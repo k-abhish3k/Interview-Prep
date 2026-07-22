@@ -3,246 +3,206 @@
 > Resume bullet (verbatim): *"Document Uploader Service: Built and Implemented an end to end document
 > uploader-ingest Azure App service with CRUD functionality."*
 
-## Business Context
+> **Correction before you study this course further:** in conversation, the four business lines this
+> service handles were misremembered as including "Credit Ops." **There is no "Credit Ops" anywhere in
+> the real codebase.** The four real business lines/departments are **IWPB, FEMA, TPMB, and GTRM** (plus
+> a generic bucket of RESEARCH/WCS/GPS/WCL/OTHER/GENERAL for departments with no dedicated workflow).
+> Double-check yourself before repeating "Credit Ops" in an interview — say IWPB, FEMA, TPMB, GTRM.
 
-Course 01 in this curriculum covers the **AI Chatbot Assistant** — a Retrieval-Augmented Generation
-(RAG) system that answers questions from an organization's internal knowledge base. RAG systems are
-only as good as the documents behind them, and those documents don't appear in a vector index by
-magic. Something has to accept a file from a human (or another system), validate it, store it
-durably, record metadata about it (who uploaded it, when, what type, what status), and hand it off to
-whatever pipeline chunks, embeds, and indexes it for retrieval.
+## This course was rebuilt from the real source code
 
-That "something" is a **document uploader / ingest service** — exactly the shape of project this
-resume bullet describes. It's the unglamorous, load-bearing plumbing that sits upstream of every
-GenAI knowledge-base feature: no reliable ingestion path, no reliable RAG answers. Built at Capco for
-banking clients **HSBC** and **Bank of America**, this service also had to satisfy constraints that
-don't show up in a toy CRUD demo — auditability of who uploaded what, soft-deletion instead of
-destructive deletes (compliance often requires a retention trail), secrets that never touch source
-control, and a deployment model the bank's cloud governance team would approve.
+Every other course in this curriculum is grounded in a resume bullet and reconstructed as a
+realistic, defensible architecture. **This one is different: it was rebuilt directly against the real,
+proprietary `upload-service` codebase** (`app.py`, ~1,240 lines; `src/uploader/iwpb_workflow.py`,
+`utils.py`, `storage.py`, `tables/`; plus `FULL_ARCHITECTURE.md`, `REQUIREMENTS.md`, and
+`DEPLOYMENT_REQUIREMENTS.md`). Facts stated plainly in this course (department names, RBAC logic, the
+approver workflow, the background maintenance loop, the real bugs found and fixed) are **confirmed by
+reading the actual code**, not illustrative reconstructions. Where a chapter proposes something that
+isn't actually implemented (a Key Vault migration, a Docker packaging option, a real versioning
+feature), it says so explicitly — that's the one place hedging language belongs in this course.
 
-## Client & Production Deployment
+This rebuild was triggered by a real interview question the candidate was asked about this exact
+project: **"for revised versions of the same document, how are you handling those?"** Chapter 05
+(`05-document-lifecycle-versioning-and-revisions.md`) and Q1 in `99-Interview-QA.md` build the honest,
+confident answer to that question — read those first if you have an interview coming up before you
+have time to read the whole course.
 
-This service was built at Capco for two banking clients — **HSBC** and **Bank of America** — and,
-like the AI Chatbot Assistant it feeds (course 01), it ran in **production, customer/client-facing**,
-not as a pilot or a demo. In practice that meant bank staff and upstream systems uploaded real
-documents against this service every business day, and "it works in a demo" wasn't the bar — the bar
-was ingesting that daily document volume without hindrance, with the audit trail, soft-delete
-behavior, and secrets hygiene a bank's cloud governance team would actually sign off on.
+## What this service actually is
 
-Because the same underlying codebase served two competing banking clients, **strict multi-tenant data
-isolation** was a hard design constraint, not an afterthought: a document uploaded for HSBC must never
-be readable, listable, or even queryable from a Bank of America session, and vice versa. That
-isolation had to hold at every layer — blob storage, SQL rows, and API-level access control — not just
-in the UI. Chapter 05 covers how that plays out in the SQL schema; the updated architecture diagram
-below shows how it plays out in the network and storage topology.
+A **single FastAPI microservice** (`app.py`) that lets HSBC staff upload documents against a
+**business line/use case** and tracks their ingestion into an external, opaque system of record the
+codebase calls **"HEXA."** It is not itself a document store: files are either relayed directly to an
+external **Ingestion API** (`INGEST_API`), or — for IWPB only — staged temporarily in Azure Blob
+Storage until a human approver signs off.
 
-## Candidate's Likely Role & Architecture
+There is **no fleet of per-department microservices**. Every department's behavior lives in this one
+process, differentiated by `use_case` string branching (`if use_case.upper() == "IWPB": ...`) and a
+feature-flag-gated role model that decides which departments a signed-in user even sees. Chapter 03
+covers why that single-service design is a defensible choice, not a shortcut.
 
-As the backend developer on this project, the candidate's responsibility was almost certainly the
-**ingestion API and its supporting infrastructure** — not the downstream AI/RAG logic (that's course
-01's territory), but the service that makes documents available to it in the first place:
+## Client and Production Context
 
-- **REST API design** for uploading, listing, retrieving, updating, and deleting documents (the
-  "CRUD functionality" called out explicitly in the bullet).
-- **FastAPI** as the web framework — an ASGI framework with native async support, Pydantic-based
-  request/response validation, automatic OpenAPI docs, and a dependency-injection system, a strong fit
-  for a focused microservice whose endpoints spend most of their time waiting on I/O (blob storage,
-  SQL, Key Vault, Graph API calls).
-- **SQLAlchemy** as the ORM for the SQL data layer — declarative models, `Session`/`sessionmaker`,
-  and Alembic-driven migrations, chosen over raw SQL cursor calls for maintainability and a reduced
-  injection surface (see chapter 02 and chapter 05).
-- **RBAC (Role-Based Access Control) enforced via MSAL and OAuth 2.0** against Azure AD/Entra ID —
-  interactive callers authenticate via the Authorization Code flow with PKCE, service-to-service
-  callers via the Client Credentials flow, and every endpoint validates the resulting Azure AD-issued
-  JWT and checks its `roles` claim (Azure AD App Roles) before allowing the operation (see chapter 06).
-- **Docker** to package the FastAPI app so it runs identically in dev, test, and prod, and so it can be
-  deployed as a container to Azure.
-- **Azure App Service** (Web App for Containers) as the hosting platform for the always-on REST API,
-  likely paired with **Azure Functions** for event-driven follow-up work — e.g., a blob-triggered
-  function that kicks off document processing the moment a file lands in storage, without the API
-  itself blocking on that work.
-- **Azure Key Vault** to hold connection strings, storage keys, and any downstream API credentials,
-  accessed via managed identity rather than hard-coded secrets.
-- **SQL** as the metadata store — one row per document, tracking filename, owner, upload timestamp,
-  processing status, and soft-delete flags — separate from the actual file bytes, which live in blob
-  storage.
-- **Azure ML** and **Azure Cognitive Services** plausibly enter downstream of ingestion — e.g., Azure
-  Cognitive Services' Document Intelligence (formerly Form Recognizer) for OCR/structure extraction
-  on uploaded PDFs, or Azure ML for any custom enrichment model, before the content is handed to the
-  chatbot's retrieval index.
-- **Microsoft Graph API** plausibly used for org-directory lookups — resolving an uploader's identity,
-  department, or permissions against Azure AD/Entra ID, so the service can enforce who's allowed to
-  upload or view which documents.
+This service was built at **Capco for HSBC** — confirmed by the real source: the SMTP "from" address
+is `hexauploader@hsbc.co.in`, role names are `stitt.ingester*`, and the external feature-flag service
+is literally named the "HSBC INM-AI Config Service." Unlike other courses in this curriculum that frame
+Capco's banking engagements as a two-bank (HSBC/Bank of America) scenario, **this specific service has
+no Bank of America involvement and no two-bank multi-tenancy** — its real multi-tenancy axis is
+**department/business-line** (IWPB vs. FEMA vs. TPMB vs. GTRM vs. everything else) within a single
+HSBC deployment, not client/tenant isolation between two banks. If "Bank of America" comes up in an
+interview about *this* project, that's a sign the question has drifted into a different engagement —
+don't force a two-bank framing onto this service.
 
-> Everything above is a **typical/recommended architecture** for this class of project — it is not a
-> verified description of Capco's internal implementation. Treat it as the story you tell in an
-> interview, backed by the concepts in this course, not as a claim about proprietary systems.
+## The Real Department Table
 
-## How This Service Feeds Course 01's Chatbot
+| Business line                           | Selected via (real role)                                                                                                                                               | Data flow                                                                                                     | Approval step?                   | Email?                                         |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------- | ---------------------------------------------- |
+| **IWPB**                          | `stitt.ingester` (default use case shown on login)                                                                                                                   | Staged in Blob Storage → DB row → approver notified by SMTP → ingested into HEXA**only on approval** | **Yes** — Approve/Decline | Yes (new-upload, daily reminder, auto-removal) |
+| **FEMA**                          | `stitt.ingester.pilot`, gated by `FEATURE_LOGICAL_SEPERATION`                                                                                                      | Direct to`INGEST_API`, no approval                                                                          | No                               | No                                             |
+| **TPMB**                          | `stitt.ingester.tpmb`, gated by `FEATURE_THIRD_PARTY_BOT` — requires **all three** of `stitt.ingester` + `.pilot` + `.tpmb` to appear in the dropdown | Direct to`INGEST_API`                                                                                       | No                               | No                                             |
+| **GTRM**                          | `stitt.ingester.gtrm`, gated by `FEATURE_GREEN_TIME` — requires **all four** roles                                                                          | Direct to`INGEST_API`                                                                                       | No                               | No                                             |
+| RESEARCH, WCS, GPS, WCL, OTHER, GENERAL | Generic Business Line field                                                                                                                                            | Direct to`INGEST_API` — the original "usual flow"                                                          | No                               | No                                             |
 
-Conceptually, this service is the **front door** to the knowledge base the AI Chatbot Assistant
-(course 01) retrieves from:
+Every department other than IWPB shares **one code path** in `upload_files()` — the
+`use_case.upper() == "IWPB"` branch is the only fork. Non-IWPB uploads never collect or send an expiry
+date, never trigger an email, and are never approval-gated.
 
-```
-Document Uploader Service (this course)  --->  Azure AI Search index  --->  Chatbot RAG pipeline (course 01)
-   (accept, validate, store, track)             (chunk, embed, index)         (retrieve, ground, answer)
-```
+## Candidate's Real Role & Architecture
 
-A user or system uploads a policy PDF through this service's `POST /documents` endpoint. Once stored
-and marked "ready," a downstream indexing job (out of scope for this course, but referenced in the
-architecture diagram below) picks it up, extracts text, chunks it, embeds it, and writes it into the
-search index the chatbot queries. If this service is slow, unreliable, or loses metadata, the chatbot
-answers from a stale or incomplete knowledge base — which is why treating this as "just a CRUD app" is
-a mistake; it's the reliability foundation for everything built on top of it.
+The confirmed, source-grounded stack:
+
+- **FastAPI**, one process, `async def` and `def` path operations mixed, handling every department.
+- **SQLAlchemy** (typed `DeclarativeBase`, schema `"uploader"`) for two real tables:
+  `ApproverMapping` and `IWPBDocumentWorkflow`. No Alembic — schema is auto-created at startup via
+  `Base.metadata.create_all(checkfirst=True)` (chapter 02 covers why that's a real, discussable gap).
+- **RBAC** driven by Azure AD app roles read from an **unverified** decoded JWT
+  (`x-ms-token-aad-id-token`, "Easy Auth" headers) plus feature flags fetched from an external HSBC
+  config service — not a textbook "MSAL handles auth" story (chapter 04 unpacks the real, layered
+  picture: manual OAuth code exchange for sign-in, MSAL for on-behalf-of and client-credentials only).
+- **A separate, relationship-based authorization pattern for IWPB approvers** — a user is an approver
+  if their email matches `approver1_email_id`/`approver2_email_id` in an `ACTIVE` `ApproverMapping`
+  row, independent of the AAD-role RBAC above (chapter 04).
+- **Azure Blob Storage** (container `pending-iwpb-uploads`) for IWPB staging, via Managed
+  Identity/`DefaultAzureCredential` or a connection string — chosen specifically so any scaled-out
+  instance can serve any staged file (unlike local disk, an earlier, rejected implementation).
+- **Azure SQL** via an internal HSBC library (`oaal.io.database.DBSession`) wrapping SQLAlchemy +
+  `pyodbc`, with `pyodbc.pooling = False` and `pool_recycle=1500` set explicitly at startup.
+- **A per-process `asyncio` background loop** (`_iwpb_maintenance_loop`, hourly by default) handling
+  reminders, 3-day auto-removal, and expiry-based purge — chapter 06 covers its real
+  not-a-singleton caveat.
+- **Native Azure App Service deployment — no Docker.** `uvicorn`/`gunicorn` runs `app.py` directly;
+  config comes from App Service Application Settings (env vars); `.env` is explicitly local-dev-only
+  (chapter 08). Any Docker content in this course is labeled as a proposal, not reality.
+- **No document versioning.** Every upload — any department — gets a brand-new `documentID` from
+  `INGEST_API`. This is the direct subject of chapter 05.
 
 ## Architecture Diagram
 
-Production topology, as deployed for HSBC and Bank of America — note there is no path from the public
-internet directly to the App Service, SQL, or Key Vault; everything downstream of Front Door sits
-inside a VNet and talks to its dependencies over Private Endpoints, and every tenant-scoped box below
-carries `tenant_id` (or a per-tenant container/schema) as a hard boundary, not a convention:
+Matches `FULL_ARCHITECTURE.md` §2 (the authoritative source document) — no Docker, no per-tenant split,
+one FastAPI process for every department:
 
 ```mermaid
 flowchart LR
-    subgraph Client["Bank Staff / Upstream System"]
-        U[HSBC user/system]
-        U2[Bank of America user/system]
+    subgraph Client["Browser"]
+        UI["Uploader / Approver Web UI\n(index.html + index.js)"]
     end
 
-    subgraph Edge["Public Edge"]
-        FD["Azure Front Door / App Gateway\n(WAF + TLS termination)"]
+    subgraph AppService["Azure App Service — FastAPI app.py (uvicorn/gunicorn, native runtime)"]
+        API["FastAPI routes\nupload / search / remove / NAS / role-check"]
+        WF["uploader.iwpb_workflow\n(IWPB-only business logic)"]
+        MAIL["uploader.email_utils (SMTP, IWPB only)"]
+        STORE["uploader.storage (Blob staging, IWPB only)"]
+        UTILS["uploader.utils\n(feature flags, JWT role decode)"]
+        CACHE["uploader.memory_cache\n(in-process bearer-token cache)"]
+        BG["_iwpb_maintenance_loop\n(asyncio background task)"]
     end
 
-    subgraph VNet["VNet — no public ingress/egress"]
-        FASTAPI["FastAPI App in Docker\n(documents router - CRUD, SQLAlchemy ORM)\nAzure AD auth via MSAL/OAuth, RBAC role checks"]
-        FUNC["Azure Function\nblob-triggered, managed identity"]
+    subgraph AAD["Azure AD / Entra ID"]
+        OAUTH["OAuth2/OIDC — auth-code, on-behalf-of, client-credentials"]
     end
 
-    subgraph Storage["Storage Layer (Private Endpoints)"]
-        BLOB["Azure Blob Storage\nper-tenant containers: hsbc/*, bofa/*"]
-        SQLDB[("Azure SQL\ntenant_id on every row,\nrow-level enforcement")]
-    end
+    MI["Managed Identity (App Service's own identity)"]
+    DB[("Azure SQL — schema 'uploader'\napprover_mapping, iwpb_document_workflow")]
+    INGEST["External Ingestion API (INGEST_API)\nsystem of record — stores into 'HEXA'"]
+    SMTP["Corporate SMTP Relay\n(hexauploader@hsbc.co.in)"]
+    BLOB[("Azure Blob Storage\ncontainer: pending-iwpb-uploads")]
+    CFGSVC["HSBC INM-AI Config Service\n(feature flags)"]
 
-    subgraph Secrets["Azure Key Vault (Private Endpoint)"]
-        KV[Connection strings,\nstorage keys, API creds]
-    end
-
-    subgraph Downstream["Downstream (course 01)"]
-        IDX["Azure AI Search Index\n(tenant-scoped)"]
-        BOT[Chatbot RAG Pipeline]
-    end
-
-    MON[Azure Monitor / Application Insights]
-
-    U -->|HTTPS + Azure AD token| FD
-    U2 -->|HTTPS + Azure AD token| FD
-    FD -->|WAF-filtered, VNet-integrated| FASTAPI
-    FASTAPI -->|store bytes, tenant-scoped path| BLOB
-    FASTAPI -->|write/read metadata via SQLAlchemy, tenant_id filter| SQLDB
-    FASTAPI -.->|managed identity read| KV
-    BLOB -->|blob-created event| FUNC
-    FUNC -.->|managed identity read| KV
-    FUNC -->|extract/enrich, tenant_id preserved| SQLDB
-    FUNC --> IDX
-    IDX --> BOT
-    FASTAPI -.->|telemetry| MON
-    FUNC -.->|telemetry| MON
+    UI <-->|HTTPS| API
+    API --> WF
+    API --> UTILS
+    API --> CACHE
+    WF --> MAIL --> SMTP
+    WF --> STORE -->|upload/download/delete blob| BLOB
+    STORE -.->|DefaultAzureCredential| MI
+    MI -.->|RBAC: Storage Blob Data Contributor| BLOB
+    API --> DB
+    WF --> DB
+    API -->|caller's bearer token| INGEST
+    WF -->|approver's or app-only token| INGEST
+    API <-->|auth-code / on-behalf-of| OAUTH
+    BG -->|client-credentials token| OAUTH
+    BG --> WF
+    UTILS -->|on-behalf-of token| CFGSVC
 ```
 
-Plain-text version, if diagram rendering isn't available:
-
-```
-HSBC user/system  --\                                        Azure Front Door / App Gateway (WAF, TLS)
-Bank of America   --> HTTPS -----------------------------------------------> |
-  user/system     --/                                                         v
-                                                  VNet-integrated FastAPI App (Docker, Azure App Service)
-                                                        |-- CRUD: POST/GET/PUT/DELETE /documents
-                                                        |      (Azure AD auth via MSAL/OAuth 2.0,
-                                                        |       RBAC role check via FastAPI dependency)
-                                                        |-- writes file bytes, tenant-scoped path
-                                                        |      --> Azure Blob Storage (private endpoint;
-                                                        |          per-tenant containers: hsbc/*, bofa/*)
-                                                        |-- writes/reads metadata via SQLAlchemy ORM,
-                                                        |      tenant_id filter
-                                                        |      --> Azure SQL (private endpoint; tenant_id on
-                                                        |          every row, enforced at query layer)
-                                                        |-- reads secrets (managed identity)
-                                                               --> Azure Key Vault (private endpoint)
-Azure Blob Storage --(blob-created event)--> Azure Function (managed identity, VNet-integrated)
-                                                --> enrich/extract, tenant_id preserved --> Azure SQL
-                                                --> Azure AI Search Index (tenant-scoped) --> Chatbot (course 01)
-
-No component above (App Service, Function, SQL, Key Vault) is reachable directly from the public
-internet — only Front Door/App Gateway faces outside, everything else sits inside the VNet behind
-Private Endpoints. Azure Monitor / Application Insights collects telemetry from the App Service and
-Function throughout.
-```
-
-**Multi-tenant isolation, explicitly:** HSBC and Bank of America share the same service codebase and
-the same Azure resources, but never the same data path. Blob storage uses per-tenant containers (or a
-`tenant_id/`-prefixed path with container-level access policies, if stricter physical separation is
-required), SQL enforces `tenant_id` on every row and every query at the repository layer (chapter 05),
-and the authenticated caller's tenant is resolved from their Azure AD identity — never taken as a
-client-supplied value — so a compromised or misconfigured request can't cross tenants by simply
-changing a parameter.
+**No Front Door/App Gateway/WAF, no VNet/Private Endpoint claims, no per-tenant containers appear
+here** — those were part of an earlier, unverified version of this course and are not confirmed by the
+real architecture docs for this service. If a banking-grade network topology like that exists in front
+of this App Service, it isn't documented in the source this course is grounded in, so it isn't asserted
+here as fact.
 
 ## STAR Summary (practice this out loud, under 90 seconds)
 
-> **Illustrative — replace with your real numbers before the interview.** The structure and
-> reasoning are sound; the specific metric (e.g. "70% reduction in manual onboarding time") should be
-> swapped for what you actually measured or a defensible estimate you're comfortable defending under
-> follow-up questions.
+**Situation.** HSBC's document-ingestion pipeline needed a way for staff across several business lines
+— IWPB, FEMA, TPMB, GTRM, and a handful of generic departments — to upload documents into HEXA
+(the bank's document system of record), with IWPB specifically requiring a human approval step before
+anything sensitive got ingested, because IWPB documents needed sign-off, an audit trail, and an
+expiry-driven retention policy that no other department needed.
 
-**Situation.** Before this service existed, documents destined for the client's internal knowledge
-base — the same knowledge base the AI Chatbot Assistant (course 01) retrieves answers from — were
-being collected and organized manually: emailed attachments, shared-drive folders, no consistent
-metadata, no audit trail of who uploaded what or when, and no reliable signal for downstream systems
-about which documents were ready to be indexed.
+**Task.** I built and extended a single FastAPI service that both handles the generic
+upload-and-relay-to-INGEST_API flow every department needs, and layers a full approver workflow on top
+for IWPB only: staging, SMTP notification, daily reminders, 3-day auto-removal, and expiry-based purge
+— without disturbing the existing, working behavior for every other department.
 
-**Task.** I was asked to design and build an end-to-end document uploader/ingest service with full
-CRUD functionality — a REST API that could accept file uploads, store them reliably, track their
-metadata and status, and make them discoverable to downstream processing, all deployed on the
-client's approved Azure environment.
+**Action.** I kept the generic departments' code path untouched (a thin, synchronous proxy in front of
+`INGEST_API`'s `batch-initialize`/`ingest` endpoints) and built the IWPB-only logic as a separate module
+(`iwpb_workflow.py`) with its own SQLAlchemy table (`IWPBDocumentWorkflow`), staging uploaded bytes in
+Azure Blob Storage (not local disk, so any scaled-out App Service instance can serve any staged file),
+notifying mapped approvers by SMTP, and deferring the actual `INGEST_API` calls until an approver
+clicked Approve. I implemented the approver-identification logic as a **separate, relationship-based**
+authorization pattern (email match against an `ApproverMapping` table), distinct from the AAD-role-based
+RBAC that decides which business lines appear in a user's dropdown in the first place. I wrote a
+per-process `asyncio` background task, started from the FastAPI `lifespan`, to run the reminder/
+auto-removal/purge sweep hourly, with each of its three responsibilities wrapped in its own
+`try`/`except` so one failing (an SMTP outage, say) never blocks the others. Along the way I found and
+fixed several real production bugs — a typo'd top-level import that would crash the whole app on
+redeploy, an undefined-variable `NameError` silently breaking search for every non-IWPB department, and
+two email-template key-mismatch bugs that left approver notification emails showing a blank title and
+a wrong reminder count.
 
-**Action.** I designed a REST API around a `documents` resource (multipart upload on `POST`, filtered
-listing with pagination on `GET`, metadata updates on `PUT`/`PATCH`, soft-delete on `DELETE`), built
-it with **FastAPI**, using its dependency-injection system for database sessions and auth/RBAC checks,
-Pydantic models for request/response validation, and automatic OpenAPI docs for downstream client
-integration. The data layer used **SQLAlchemy** as the ORM — declarative models, `Session`-scoped
-transactions, and Alembic migrations — instead of raw SQL cursor calls, for maintainability and a
-reduced injection surface. Every endpoint sat behind **RBAC enforced via MSAL and OAuth 2.0**: callers
-authenticated against Azure AD (interactive users via Authorization Code + PKCE, service-to-service
-callers via Client Credentials), and a FastAPI dependency validated the resulting JWT and checked its
-Azure AD App Role claims before allowing the operation. I containerized the app with Docker using a
-multi-stage build to keep the production image small, and deployed it to Azure App Service as a Web
-App for Containers, with a separate Azure Function handling blob-triggered post-upload processing so
-the upload request itself never blocked on slow downstream work. I moved every secret — SQL
-connection string, storage account key — into Azure Key Vault, accessed via managed identity, and
-designed the SQL schema for document metadata with proper indexes, audit columns (created_by,
-created_at, updated_at), and a soft-delete flag so nothing was destructively removed.
-
-**Result.** *(Illustrative)* The service cut manual document-onboarding time by roughly 70% and gave
-the team a reliable, auditable pipeline feeding the chatbot's knowledge base — reducing the "why isn't
-my document showing up in the assistant's answers" support burden to near zero, since every upload now
-had a trackable status instead of disappearing into a shared folder.
+**Result.** IWPB documents now have a real, auditable approval and retention lifecycle (staged →
+approved/declined/auto-removed → purged on expiry) with zero disruption to the five other departments'
+existing upload flow, and the bugs found along the way were fixed before they caused a production
+incident rather than after.
 
 ## How This Course Is Organized
 
-| File | Covers |
-|---|---|
-| `01-rest-api-design-and-crud-fundamentals.md` | REST principles, CRUD-to-HTTP mapping, pagination, versioning, upload-specific API design (multipart, async processing, idempotency keys) |
-| `02-building-the-service-with-fastapi.md` | FastAPI fundamentals (path operations, Pydantic validation, dependency injection, async, OpenAPI docs), SQLAlchemy ORM fundamentals (declarative models, `Session`, relationships), a worked `Document` model + CRUD router |
-| `03-containerizing-with-docker.md` | Docker fundamentals, layers/caching, multi-stage builds, a sample FastAPI/uvicorn Dockerfile, container registry/deployment basics |
-| `04-azure-app-service-and-functions-deployment.md` | Azure App Service (slots, scaling, containers) vs Azure Functions (event-driven), and when to choose which |
-| `05-secrets-management-with-key-vault-and-sql-integration.md` | Azure Key Vault (managed identity, rotation), SQL schema design for metadata (indexes, soft-delete, audit columns) expressed via SQLAlchemy ORM, Microsoft Graph API for org/permission lookups |
-| `06-authentication-rbac-with-msal-and-oauth.md` | OAuth 2.0 (Authorization Code + PKCE, Client Credentials), OpenID Connect, MSAL token acquisition, JWT validation against Azure AD's JWKS, RBAC via Azure AD App Roles and a FastAPI `require_role` dependency |
-| `99-Interview-QA.md` | Behavioral, technical, and system-design interview Q&A |
-| `notebooks/` | Three runnable Jupyter notebooks: a FastAPI CRUD + RBAC demo, a SQLAlchemy data-layer demo, and a Docker/Azure deployment walkthrough |
+| File                                                              | Covers                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `01-rest-api-design-and-crud-fundamentals.md`                   | REST/CRUD fundamentals, grounded with a note on how this service is really more "use-case-oriented proxy" than classic per-resource CRUD                                                                                                |
+| `02-building-the-service-with-fastapi.md`                       | FastAPI/SQLAlchemy fundamentals, the real`ApproverMapping`/`IWPBDocumentWorkflow` models, `create_all(checkfirst=True)` and the no-Alembic gap                                                                                    |
+| `03-multi-department-architecture-and-business-line-routing.md` | The real department inventory, single-shared-process design vs. one-microservice-per-department, feature-flag-gated visibility, honest scope boundary around downstream Azure AI Search                                                 |
+| `04-authentication-rbac-with-msal-and-oauth.md`                 | The real, layered auth picture: manual OAuth code exchange, MSAL for OBO + client-credentials only, unverified-JWT trust boundary, AAD-role RBAC, IWPB's separate relationship-based approver pattern                                   |
+| `05-document-lifecycle-versioning-and-revisions.md`             | **Directly answers the real interview question** — what happens today (no versioning), the manual "supersede" workaround, why IWPB's status machine isn't versioning, a proposed real design, the downstream search-index tie-in |
+| `06-production-resilience-and-operational-engineering.md`       | Real error-handling table, background-loop and`memory_cache` scaling caveats, the four real bugs found and fixed, timeout/pooling settings, the hardcoded session secret, `/docs`-disabled-in-PROD and warm-up gating               |
+| `07-secrets-configuration-and-key-vault.md`                     | Honest: config lives in App Service Application Settings today, not Key Vault; Key Vault framed as a hardening proposal; Managed Identity (confirmed real) for Blob access                                                              |
+| `08-deployment-azure-app-service.md`                            | The real deployment (no Docker — native App Service Python runtime), containerizing as a clearly-labeled alternative,`/health`, warm-up gating                                                                                       |
+| `99-Interview-QA.md`                                            | The actual asked question, answered first; department/RBAC questions; background-loop and cache scaling; manual-OAuth-vs-MSAL nuance; real bug stories; the honest Azure AI Search boundary                                             |
+| `notebooks/`                                                    | Five runnable notebooks: FastAPI CRUD demo, SQL data-layer demo, deployment walkthrough (App Service-first), a role-to-business-line RBAC demo matching the real algorithm, and a document-revision-workaround demo                     |
 
-Read in order — each chapter builds on the last, and the notebooks are meant to be run alongside the
-chapter with the matching topic (notebook 1 with chapter 2, notebook 2 with chapter 5, notebook 3 with
-chapters 3–4).
+Read in order. Chapter 05 is the one to read first if you have an interview scheduled before you can
+read the rest of the course.
 
-Before naming HSBC or Bank of America to an interviewer, check the confidentiality note in the root
+Before naming HSBC to an interviewer, check the confidentiality note in the root
 [`README.md`](../README.md) — most engagements are covered by client-confidentiality clauses, and
 "a top-3 global bank" is often the safer phrasing.

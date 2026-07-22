@@ -27,7 +27,7 @@ This chatbot was built at Capco for **HSBC**, and a comparable pattern was later
 was not a pilot or an internal-only demo: it went to **production with a customer-facing interface**,
 serving real daily customer/employee query volume. That "real production, real traffic, real bank"
 framing is the fact set behind every architectural claim in this course — see the root
-[README's Client & Production Context](../README.md#client--production-context-applies-to-every-course-below)
+[README&#39;s Client &amp; Production Context](../README.md#client--production-context-applies-to-every-course-below)
 for the full statement. Concretely, production deployment meant:
 
 - **Azure App Service** hosting the backend, with **deployment slots** used for zero-downtime
@@ -76,7 +76,7 @@ scratch for a chatbot engagement). That means:
 
 > The client (HSBC), the production/customer-facing nature of the deployment, and the Azure production
 > topology (App Service, Front Door/App Gateway, VNet/Private Endpoints, Azure AD, Azure Monitor,
-> Azure OpenAI, Azure DevOps) are confirmed facts — see "Client & Production Deployment" above. The
+> Azure OpenAI, Azure DevOps) are confirmed facts — see "Client & Production Deployment" above. Thewb
 > finer-grained implementation detail below it (exact framework choices like LangChain/LCEL,
 > Streamlit/Chainlit, Azure AI Search) is still a **typical/recommended architecture** for this class
 > of project, not a verified line-by-line description of Capco's internal implementation. Treat that
@@ -184,15 +184,15 @@ time for new prompt/model changes from days to under an hour.
 
 ## How This Course Is Organized
 
-| File | Covers |
-|---|---|
-| `01-llm-fundamentals-and-prompt-engineering.md` | What an LLM actually does, prompt engineering patterns, failure modes |
-| `02-langchain-and-lcel.md` | LangChain core abstractions and the LCEL pipe-composition model |
-| `03-chatbot-architecture-azure-openai.md` | Production chatbot architecture on Azure — deployments, RAG, latency/cost, content filtering |
-| `04-building-uis-chainlit-streamlit.md` | Rapid UI prototyping with Streamlit and Chainlit |
-| `05-agents-and-tools-langchain-agent-case-study.md` | LangChain agents/ReAct, worked case study: Text-to-Math solver on Groq/Gemma2-9b |
-| `99-Interview-QA.md` | Behavioral, technical, and system-design interview Q&A |
-| `notebooks/` | Four runnable Jupyter notebooks, one per major concept, offline-friendly |
+| File                                                  | Covers                                                                                        |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `01-llm-fundamentals-and-prompt-engineering.md`     | What an LLM actually does, prompt engineering patterns, failure modes                         |
+| `02-langchain-and-lcel.md`                          | LangChain core abstractions and the LCEL pipe-composition model                               |
+| `03-chatbot-architecture-azure-openai.md`           | Production chatbot architecture on Azure — deployments, RAG, latency/cost, content filtering |
+| `04-building-uis-chainlit-streamlit.md`             | Rapid UI prototyping with Streamlit and Chainlit                                              |
+| `05-agents-and-tools-langchain-agent-case-study.md` | LangChain agents/ReAct, worked case study: Text-to-Math solver on Groq/Gemma2-9b              |
+| `99-Interview-QA.md`                                | Behavioral, technical, and system-design interview Q&A                                        |
+| `notebooks/`                                        | Four runnable Jupyter notebooks, one per major concept, offline-friendly                      |
 
 Read in order — each chapter builds on the last, and the notebooks are meant to be run alongside the
 chapter with the matching number.

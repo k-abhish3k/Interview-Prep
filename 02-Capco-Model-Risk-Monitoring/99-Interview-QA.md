@@ -1,8 +1,11 @@
 # 99 — Interview Q&A: Model Risk Monitoring for AI Assistant
 
-Read this last, after Chapters 00-05, while the concepts are fresh. Questions are grouped
+Read this last, after Chapters 00-07, while the concepts are fresh. Questions are grouped
 behavioral -> technical deep-dive -> system design -> reflective. Practice the STAR question out loud
-in under 90 seconds before anything else.
+in under 90 seconds before anything else. **Question 2 is the "gotcha" question — the natural, sharp
+follow-up any interviewer who understood chapter 05's rolling-baseline alerting would ask next** — it's
+positioned right after the behavioral warm-up, deliberately, the same way Course 03 puts its real
+asked-in-an-interview question first. Questions 3-5 are direct follow-ups drawing on chapter 07.
 
 ---
 
@@ -28,7 +31,94 @@ metric to be consistent run-to-run.
 
 ---
 
-### 2. How do you measure hallucination without ground-truth labels?
+### 2. If the chatbot's prompt or model changes, how does your monitoring system avoid comparing against a stale baseline?
+
+This is the gotcha question — the analog, for this project, of the real "how do you handle revised
+versions of the same document" question Course 03's uploader service was actually asked. The full worked
+answer lives in chapter 06 (`06-baseline-staleness-and-drift-lifecycle.md`) — this is the compressed,
+interview-ready version:
+
+> "Today, the rolling baseline — a 30-day trailing mean and standard deviation, per chapter 05's alerting
+> design — has no concept of a version boundary. There's a deployment marker drawn on the executive trend
+> chart, but it's a chart annotation for a human to eyeball, not an input the alerting engine itself
+> reads. So a deliberate prompt or model change either looks like a false-positive regression for as long
+> as pre-change data still dominates the trailing window, or — the worse direction — a genuine regression
+> slowly gets absorbed into the baseline as 'the new normal' over that same trailing window, quietly
+> loosening the threshold around exactly the failure it should be catching.
+>
+> The workaround that exists today is entirely manual: silence alerting for a known deploy window, then
+> manually reset the baseline's lookback so it starts from the deploy date instead of waiting up to 30
+> days for old data to roll out naturally. That only works if whoever's shipping the change remembers to
+> do both steps — nothing technical enforces it, and a hotfix or a silent model-provider-side update can
+> ship with neither step happening at all.
+>
+> It's also worth being precise that this is a different problem from genuine drift. A stale knowledge
+> base, a shifting user population, or even a silent update on the model provider's side are real
+> degradations the baseline *should* catch — that's the system working as intended. Conflating that with
+> 'someone must have deployed something' and resetting the baseline in response would quietly launder a
+> real regression into the new normal, which is the worse of the two mistakes.
+>
+> If I were building a real fix, I'd version the baseline itself: tag every response with a fingerprint
+> of the active prompt/model/retrieval config — an `assistant_version_tag` — and key each client's
+> baseline to `(client_id, assistant_version_tag)` instead of just `client_id`. A new tag opens a
+> `LEARNING`-phase baseline that still lets alerts fire (at lower urgency, not silenced) against the
+> previous version's baseline until the new one accumulates enough samples to stabilize, then flips to
+> `ACTIVE` and retires — not deletes — the old one, so a clean before/after comparison stays possible.
+> But that version tag can't be reliably inferred from the metrics side, because a distribution shift is
+> exactly what it's supposed to help classify — it has to come from the CI/CD pipeline that actually
+> deploys the assistant, as a release-gate event, the same way Course 04's pipeline would be the natural
+> place to emit it."
+
+**Follow-ups to be ready for (drawing on chapter 07):**
+
+---
+
+### 3. Two of your async evaluators flag the same conversation independently — how do you know you're not double-counting it?
+
+**Model answer:** By construction, this is a real race: a synchronous Tier 1 rule-based gate and an
+asynchronous Tier 3 LLM-as-judge classifier can both independently decide to flag the same
+`response_id`, running on separate execution paths precisely because they're not supposed to block each
+other. A naive application-level "read the current count, write count + 1" pattern is not safe under
+that concurrency — it can lose an increment, or in some interleavings double-count one flagged
+conversation as two. The fix is to stop incrementing a counter in application code at all: use an atomic
+SQL increment, or better, maintain a `flags` table with a unique constraint on `(response_id,
+evaluator_name)` and count distinct flagged `response_id`s. That makes a single evaluator's retried write
+idempotent, and two *different* evaluators flagging the same response correctly collapses to one flagged
+conversation, not two. This is exactly the kind of bug that would only show up under genuine concurrent
+load, not a sequential unit test — a real regression test for it has to fire both evaluators against the
+same response truly concurrently and assert the final count.
+
+---
+
+### 4. Which evaluator failures are you comfortable letting block a live response, and which should never block?
+
+**Model answer:** The split is entirely about which tier the evaluator runs in, not how "important" the
+metric sounds. Only the synchronous Tier 1 gate (cheap PII/toxicity/injection-pattern checks, on 100% of
+traffic) is in a position to block anything, because it's the only evaluator still in the request path
+when the decision to release a response gets made — and even there, it fails closed on an actual
+exception (a bug shouldn't silently let something unsafe through) but fails open on merely exceeding its
+latency budget (a rare slow evaluation shouldn't take down the whole assistant's availability). Anything
+past Tier 1 — LLM-as-judge, Ragas metrics, the hourly aggregation job — runs after the response has
+already reached the user, so by definition it can never block that response; a failure there just gets
+logged and excluded from that period's aggregate, distinctly from a genuine low score, so a spike in
+evaluation failures is itself visible rather than silently treated as "everything's fine."
+
+---
+
+### 5. What's the one hardening gap you'd flag first if a security reviewer asked about this platform?
+
+**Model answer:** The alert-routing webhook URL — the endpoint that posts critical-severity pages into a
+bank's on-call channel — being a bare, unauthenticated URL sitting in plain configuration rather than a
+secret store. Incoming webhook URLs of that style are effectively bearer tokens: anyone who can read that
+configuration value can post directly into the channel with no further authentication, which means a
+leaked URL could be used to flood a bank's on-call rotation with fabricated pages (training the team to
+distrust real ones) or simply to learn where a client's alerts are routed. The fix is the same shape as
+the hardcoded session-secret gap in Course 03's uploader service: move it into Key Vault, reference it at
+runtime, and rotate it per client so a compromise on one bank's channel doesn't also expose the other's.
+
+---
+
+### 6. How do you measure hallucination without ground-truth labels?
 
 **Model answer:** Ground truth for "is this true" is expensive and often doesn't exist for novel user
 questions, so instead of checking truth against the real world, you check the response against the
@@ -42,7 +132,7 @@ that failed to support it.
 
 ---
 
-### 3. What's the difference between LLM-as-judge and Ragas metrics — aren't they the same thing?
+### 7. What's the difference between LLM-as-judge and Ragas metrics — aren't they the same thing?
 
 **Model answer:** They overlap but aren't identical. LLM-as-judge is a *general technique* — use an
 LLM to score another LLM's output against some rubric (accuracy, completeness, tone, whatever you
@@ -57,7 +147,7 @@ a Ragas metric at all.
 
 ---
 
-### 4. How would you detect a prompt injection attack in production?
+### 8. How would you detect a prompt injection attack in production?
 
 **Model answer:** Layered, not single-point. On the input side: pattern/classifier-based detection of
 common injection phrasing ("ignore previous instructions," role-play jailbreak framing) to flag or
@@ -73,7 +163,7 @@ working again after a prompt or model change.
 
 ---
 
-### 5. SHAP vs. LIME — when would you pick one over the other?
+### 9. SHAP vs. LIME — when would you pick one over the other?
 
 **Model answer:** Both explain individual predictions, but differently. SHAP is grounded in Shapley
 values from game theory, gives theoretically consistent local *and* aggregatable global explanations,
@@ -88,7 +178,7 @@ of the random sampling in the perturbation step, whereas SHAP is more consistent
 
 ---
 
-### 6. Where does Shapash fit if SHAP and LIME already exist?
+### 10. Where does Shapash fit if SHAP and LIME already exist?
 
 **Model answer:** Shapash isn't a competing algorithm — it's a reporting/dashboard layer built on top
 of SHAP (and LIME) output, designed for non-technical stakeholders. In a model-risk context, that
@@ -100,7 +190,7 @@ hand to an auditor."
 
 ---
 
-### 7. Why track both efficiency and latency separately — aren't they the same thing?
+### 11. Why track both efficiency and latency separately — aren't they the same thing?
 
 **Model answer:** They're correlated but measure different failure modes. Latency is wall-clock time
 to respond — what the user experiences, usually tracked as p50/p95/p99 rather than average, because a
@@ -113,7 +203,7 @@ efficiency spike with flat latency points to prompt bloat or excessive retries.
 
 ---
 
-### 8. How do you decide what to run synchronously (blocking) vs. asynchronously (sampled) in the evaluation pipeline?
+### 12. How do you decide what to run synchronously (blocking) vs. asynchronously (sampled) in the evaluation pipeline?
 
 **Model answer:** Split by cost and by what the check is protecting against. Anything cheap and
 deterministic that gates *safety* — PII regex, toxicity keyword filters, basic guardrail triggers —
@@ -127,7 +217,7 @@ cheap checks; sampled/async for expensive, quality-trend checks.
 
 ---
 
-### 9. What's the difference between robustness testing and adversarial ("bad-actor") testing?
+### 13. What's the difference between robustness testing and adversarial ("bad-actor") testing?
 
 **Model answer:** Different threat models. Robustness testing assumes a *good-faith* user who happens
 to phrase things differently — typos, paraphrases, casual register — and checks whether answer quality
@@ -141,7 +231,7 @@ separation, and stricter refusal behavior.
 
 ---
 
-### 10. How do "reliance" and "engagement" fit into a metrics pipeline that's mostly about correctness and safety?
+### 14. How do "reliance" and "engagement" fit into a metrics pipeline that's mostly about correctness and safety?
 
 **Model answer:** They're the implicit-signal counterpart to the explicit metrics. Faithfulness,
 harmfulness, etc. are computed *by the system evaluating itself* — reliance (did the user act on the
@@ -156,7 +246,7 @@ engagement looks bad" is itself a useful finding.
 
 ---
 
-### 11. (System design) Design a real-time moderation pipeline that doesn't add unacceptable latency.
+### 15. (System design) Design a real-time moderation pipeline that doesn't add unacceptable latency.
 
 **Model answer sketch:**
 - **Tier 1 — inline, blocking, sub-50ms budget:** cheap deterministic checks only — regex PII/toxic-
@@ -186,7 +276,7 @@ the product/latency requirements, not a fixed law.
 
 ---
 
-### 12. (System design) How would you validate that your LLM-as-judge metric is itself trustworthy?
+### 16. (System design) How would you validate that your LLM-as-judge metric is itself trustworthy?
 
 **Model answer:** Treat the judge like any other model that needs validation, not as ground truth by
 assumption. Practical steps: (1) build a small human-labeled gold set (even 100-200 examples) and
@@ -201,7 +291,7 @@ on the judge itself, especially after switching judge model versions.
 
 ---
 
-### 13. What would you change if you rebuilt this today?
+### 17. What would you change if you rebuilt this today?
 
 **Model answer (adapt to your real experience, but structure to use):** "A few things. First, I'd
 invest earlier in the human-labeled gold set for validating the LLM-as-judge scores — we built the
@@ -217,7 +307,7 @@ months in production, and I'd try to front-load them next time."
 
 ---
 
-### 14. Why does a bank need a formal model-risk process for a chatbot — isn't that overkill compared to a normal software bug?
+### 18. Why does a bank need a formal model-risk process for a chatbot — isn't that overkill compared to a normal software bug?
 
 **Model answer:** A traditional software bug is usually deterministic and reproducible — the same
 input produces the same wrong output, and you can write a regression test that permanently fixes it.
@@ -234,7 +324,7 @@ bank in a way a typical UI bug isn't.
 
 ---
 
-### 15. How do you handle disagreement between the automated metrics and user feedback — e.g., faithfulness scores are high but thumbs-down rate is rising on a topic?
+### 19. How do you handle disagreement between the automated metrics and user feedback — e.g., faithfulness scores are high but thumbs-down rate is rising on a topic?
 
 **Model answer:** Treat it as a signal that the automated metrics are measuring the wrong thing for
 that segment, not that user feedback is noise to be dismissed. First step is manual case review on the
@@ -250,7 +340,7 @@ than relying on faithfulness/relevancy alone to represent overall quality.
 
 ---
 
-### 16. You built this for two banking clients, HSBC and Bank of America — how did you guarantee metric/data isolation between them?
+### 20. You built this for two banking clients, HSBC and Bank of America — how did you guarantee metric/data isolation between them?
 
 **Model answer:** Two layers, deliberately redundant. At the data layer, every record written into the
 metrics store — every per-response evaluation, every feedback signal — carries a mandatory `client_id`
@@ -269,7 +359,7 @@ that structural guarantee is worth the extra operational cost of maintaining two
 
 ---
 
-### 17. Why does model risk monitoring matter more for a customer-facing production chatbot at a bank than it would for an internal prototype?
+### 21. Why does model risk monitoring matter more for a customer-facing production chatbot at a bank than it would for an internal prototype?
 
 **Model answer:** Three things change once a system is customer-facing and in production at scale, and
 each one raises the stakes of getting monitoring wrong. First, **blast radius** — a prototype's failure
@@ -290,7 +380,7 @@ launch.
 
 ---
 
-### 18. How would a bank's model-risk officer actually use this dashboard day to day, and what would make them escalate to you?
+### 22. How would a bank's model-risk officer actually use this dashboard day to day, and what would make them escalate to you?
 
 **Model answer:** Day to day, it's mostly a quick check of the executive/trend view — is faithfulness,
 hallucination rate, and harmfulness rate flat or trending in the right direction versus the last

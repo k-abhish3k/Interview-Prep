@@ -182,6 +182,17 @@ Gateway, Secrets Manager, CloudWatch). The client-isolation details above (separ
 separate IAM roles, namespaced Sagemaker endpoints) aren't incidental — for a compliance platform serving
 two competing pharma companies, that isolation is a hard production requirement, not an optimization.
 
+## 4a. Two gotchas worth reading before an interview
+
+Two chapters go a level deeper than the rest of this course on questions an interviewer who understands
+this domain is likely to ask. **Chapter 07** answers "when the approved-claims library gets revised, how
+do you stop the Content Comparator from matching against a claim that's since been withdrawn?" — the
+analog, in this project, of the document-versioning gotcha in the Capco Document Uploader course.
+**Chapter 08** covers the production-resilience side: a realistic error-handling table for the claims
+pipeline, a Sagemaker/Lambda model-version caching caveat, four concrete NLP-pipeline bug stories, and one
+candidly-named hardening gap. Read these two first if you have an interview coming up before you have
+time for the rest of the course.
+
 ## 5. How the chapters map to this
 
 | Chapter | Covers |
@@ -192,10 +203,12 @@ two competing pharma companies, that isolation is a hard production requirement,
 | [04-mlops-automated-retraining-pipelines.md](04-mlops-automated-retraining-pipelines.md) | Retraining triggers, pipeline stages, artifact lineage |
 | [05-aws-sagemaker-deployment-and-autoscaling.md](05-aws-sagemaker-deployment-and-autoscaling.md) | Sagemaker, S3, multi-model endpoints, auto-scaling, EventBridge, Lambda/API Gateway, Secrets Manager, CloudWatch |
 | [06-classic-ml-bonus-crop-prediction-case-study.md](06-classic-ml-bonus-crop-prediction-case-study.md) | Bonus: classic tabular ML via the personal crop-prediction project |
+| [07-approved-library-versioning-and-stale-comparison.md](07-approved-library-versioning-and-stale-comparison.md) | **The "revised claims" gotcha** — what happens today when the approved-claims library is revised, why matching "an approved claim" isn't the same as matching a *currently* approved one, a proposed `claim_family_id`/`claim_version`/`superseded_by_claim_id` design, and the tie into chapter 04's retraining pipeline needing a *current* library snapshot |
+| [08-production-resilience-and-operational-engineering.md](08-production-resilience-and-operational-engineering.md) | Real-shaped error-handling table (block vs. flag-for-review), a Lambda/Sagemaker model-version cache staleness caveat, four concrete NLP-pipeline bug narratives, concrete threshold/timeout/batch values, one candidly-named hardening gap |
 | [99-Interview-QA.md](99-Interview-QA.md) | Interview question bank |
 
 Notebooks live in [`notebooks/`](notebooks/) and are runnable, offline, CPU-only companions to
-chapters 01, 02, 03, 05, and 06.
+chapters 01, 02, 03, 05, 06, 07, and 08.
 
 ## 6. STAR summary
 

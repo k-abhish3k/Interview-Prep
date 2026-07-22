@@ -180,11 +180,14 @@ instead of relying on manual verification.
 | `03-infrastructure-as-code-with-terraform.md` | Terraform fundamentals (providers, resources, state, plan/apply, modules), a worked `.tf` example for App Service + Key Vault |
 | `04-release-strategies-and-environments.md` | Blue-green, canary, rolling, deployment slots, environment promotion, approval gates, rollback |
 | `05-github-vs-azure-repos-branching.md` | Branching strategies, PR gates/required reviewers, GitHub Actions vs. Azure DevOps Pipelines |
+| `06-multi-service-version-pinning-and-environment-drift.md` | The honest answer to "if you roll back one of three independently-versioned services, how do you keep the environment from ending up in an inconsistent combination of versions" — today's gap, a manual compatibility-matrix workaround, a proposed release-manifest design, and the forward tie to course 02's monitoring platform |
+| `07-production-resilience-and-operational-engineering.md` | Pipeline-stage-by-stage failure/rollback table, concurrency traps (state-lock contention, an un-versioned shared manifest write), four concrete CI/CD bug narratives, real timeout/retry values, and one candidly-named policy-as-code hardening gap |
 | `99-Interview-QA.md` | Behavioral, technical, system-design, and "what would you change" interview Q&A |
-| `notebooks/` | Three runnable Jupyter notebooks that simulate/validate pipeline concepts offline |
+| `notebooks/` | Five runnable Jupyter notebooks that simulate/validate pipeline concepts offline |
 
 Read in order — each chapter builds on the last, and the notebooks are meant to be run alongside the
-chapter with the matching topic (pipeline YAML, Terraform plan output, and post-deploy smoke tests).
+chapter with the matching topic (pipeline YAML, Terraform plan output, post-deploy smoke tests, the
+version-compatibility-matrix validator, and the Terraform plan-diff safety gate).
 
 Before naming HSBC or Bank of America out loud to an interviewer, check what your actual NDA/engagement
 letter allows — see the confidentiality note in the root [README.md](../README.md).

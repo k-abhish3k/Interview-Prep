@@ -1,5 +1,20 @@
 # 01 — REST API Design and CRUD Fundamentals
 
+> **Grounding note, read this first.** The concepts in this chapter (resources, verbs, status codes,
+> idempotency, pagination, versioning) are general REST/CRUD fundamentals and are taught here the way
+> any solid backend course would teach them. The **real service is not a classic per-resource CRUD
+> API**, though — it's closer to a **use-case-oriented proxy in front of an external ingestion API**.
+> Concretely: `/upload-files/{use_case}`, `/search-ingested-documents/{use_case}`, and
+> `/remove-ingested-document/{use_case}` are thin, mostly-synchronous relays that call an external
+> `INGEST_API`'s `batch-initialize`/`ingest`/`GET ingest/HEXA`/`DELETE ingest/.../HEXA` endpoints and
+> pass the response straight back — there's no local `documents` table, no `PUT`/`PATCH`, and no
+> soft-delete flag for most departments. The one exception is **IWPB**, which has real local state (a
+> `IWPBDocumentWorkflow` SQL row per document, with actual create/read/update transitions) — that's the
+> part of this service closest to genuine CRUD, and it's covered in chapter 02. Keep that distinction in
+> mind while reading the general material below: it's the right mental model for REST API design in
+> general, but map it onto *this* service as "proxy + one real stateful workflow," not "five CRUD
+> resources."
+
 ## Why REST, and why it matters beyond "it's the standard"
 
 Before writing a line of FastAPI, it's worth being able to explain *why* REST is the right shape for a

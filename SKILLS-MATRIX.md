@@ -28,7 +28,7 @@ folder to review.
 | WebApp, Azure Functions | 03-Capco-Document-Uploader-Service |
 | Sagemaker Studio | 05, 07, 08 (Indegene CV/NLP courses) |
 | REST APIs, FastAPI, SQLAlchemy (ORM) | 03-Capco-Document-Uploader-Service |
-| Docker | 03-Capco-Document-Uploader-Service, 04-Capco-CICD-Pipelines |
+| Docker | 04-Capco-CICD-Pipelines (03's real deployment is native App Service, no Docker — see course 03 note) |
 | TensorFlow Serving | 08-Indegene-Chart-Graph-Detection |
 | Power BI, Tableau | 02-Capco-Model-Risk-Monitoring (monitoring dashboards) |
 | Azure ML, SQL | 03-Capco-Document-Uploader-Service |
@@ -40,7 +40,7 @@ folder to review.
 |---|---|
 | Azure AI Search | 06-Indegene-GenAI-Virtual-Liaison-Platform (as Azure equivalent), 01 |
 | Azure WebApp, Azure Functions | 03-Capco-Document-Uploader-Service |
-| Azure Key Vault | 03-Capco-Document-Uploader-Service |
+| Azure Key Vault | 03-Capco-Document-Uploader-Service (real config is App Service Application Settings; Key Vault is a proposed hardening step, not confirmed as implemented) |
 | Azure Cognitive Services, Azure OpenAI | 01-Capco-AI-Chatbot-Assistant |
 | Microsoft Graph API | 03-Capco-Document-Uploader-Service |
 | AWS Secrets Manager | 07-Indegene-Claim-Extraction-Tagging |

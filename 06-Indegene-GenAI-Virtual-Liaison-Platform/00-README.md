@@ -7,6 +7,19 @@
 > project tracking & summarization, RAG-enabled Cost catalog generation system, Entity-extraction-based
 > Project demand capture & multiple Recommender Systems."*
 
+## If you have an interview coming up: read Chapter 8 first
+
+This course is the strongest direct analog in the whole curriculum to course 3's "how do you handle
+revised versions of a document" chapter — same underlying failure mode, one layer down the stack.
+Course 3 asks whether the document store knows which upload is current; **Chapter 8
+(`08-vector-index-staleness-and-document-revision-handling.md`)** asks the same question about
+Pinecone: when a project's status, a cost-catalog entry, or a document changes at the source, how do
+you keep the RAG pipeline from retrieving and confidently answering from the old, stale vector? Q1 in
+`99-Interview-QA.md` is the compressed, interview-ready version of that same answer. Chapter 9
+(`09-production-resilience-and-operational-engineering.md`) is this course's counterpart to course 3's
+production-resilience chapter — the real-shaped error-handling table, scaling caveats, bug stories, and
+timeout values for a RAG/LangGraph platform.
+
 ## Business Context
 
 Indegene is a digital-first life sciences commercialization company — it runs the operational
@@ -201,12 +214,15 @@ Key production points worth being able to explain, not just diagram:
 | `05-entity-extraction-and-ner.md` | Rule-based, spaCy, and LLM structured-output entity extraction for project-demand capture |
 | `06-recommender-systems-fundamentals.md` | Content-based, collaborative filtering, and embedding-similarity recommenders for projects/cost items |
 | `07-langgraph-and-langserve-for-multiagent-apps.md` | LangGraph for stateful multi-node orchestration across the five sub-systems; LangServe for deployment as a REST API |
-| `99-Interview-QA.md` | 20+ behavioral, technical deep-dive, system-design, and client/production-deployment interview Q&A |
-| `notebooks/` | Six runnable, offline notebooks — one RAG-from-scratch, one Pinecone-shaped demo, one hybrid search, one summarization, one NER, one recommender |
+| `08-vector-index-staleness-and-document-revision-handling.md` | **The vector-index-layer analog of course 3's document-versioning question** — what keeps Pinecone in sync with source data today (an upsert-on-change trigger plus a periodic re-index backstop), the honest gap (no delete-on-source-removal path), why "the similarity score is valid" and "the content is still current" are two different questions, a proposed `document_version`/`supersedes_id`/`is_current` metadata design, and the forward-looking tie to Chapter 4's summarization feature |
+| `09-production-resilience-and-operational-engineering.md` | Real-shaped error-handling table for the RAG pipeline (graceful degradation vs. hard failure), the in-process embedding-cache scaling caveat on ECS Fargate, four RAG/LangGraph-specific bug narratives, concrete timeout/retry/pooling values, and a candidly-named credential-rotation hardening gap |
+| `99-Interview-QA.md` | 20+ behavioral, technical deep-dive, system-design, and client/production-deployment interview Q&A — **Q1 is the vector-staleness gotcha question**, ahead of the general behavioral warm-up |
+| `notebooks/` | Eight runnable, offline notebooks — one RAG-from-scratch, one Pinecone-shaped demo, one hybrid search, one summarization, one NER, one recommender, one version-aware upsert/retire demo, and one namespace-isolation resilience test |
 
 Read in order: `01` through `07` build on each other (RAG → vector DB → hybrid search → summarization
-→ extraction → recommenders → the LangGraph layer that ties all five together), and each chapter's
-matching notebook is meant to be run alongside it.
+→ extraction → recommenders → the LangGraph layer that ties all five together); `08` and `09` extend
+the course with the same production-hardening depth course 3 has (vector-index staleness/versioning,
+then operational resilience), and each chapter's matching notebook is meant to be run alongside it.
 
 ## STAR Summary (practice this out loud, under 90 seconds)
 

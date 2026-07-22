@@ -1,15 +1,82 @@
 # 99 — Interview Q&A: CI/CD Pipeline Implementation
 
-Read this last, once chapters 01-05 and the notebooks are fresh. Questions are grouped behavioral →
+Read this last, once chapters 01-07 and the notebooks are fresh. Questions are grouped behavioral →
 technical deep-dive → system design → retrospective. Practice the behavioral ones out loud; for the
 technical ones, focus on the *reasoning*, not memorizing the answer verbatim — follow-up questions
-will probe whether you actually understand the tradeoff.
+will probe whether you actually understand the tradeoff. **Q1 is the gotcha question worth having
+fully internalized before anything else in this file** — it comes first, deliberately, the same way
+course 03's document-versioning question leads that course's Q&A.
+
+---
+
+## Q1. If you roll back one of these three services, how do you make sure the environment doesn't end up in an inconsistent combination of versions?
+
+This is the gotcha question. The full worked answer lives in chapter 06
+(`06-multi-service-version-pinning-and-environment-drift.md`) — this is the compressed,
+interview-ready version:
+
+> "Each of the three services — chatbot, monitoring, uploader — has its own pipeline, its own image
+> versioning, and its own rollback mechanics, and each of those is solid in isolation: a slot-swap
+> rollback for any one of them is fast and low-risk on its own terms. What's missing is a shared record
+> of which combination of all three versions is actually known to work together — today, nothing stops
+> you from rolling back the chatbot to a version whose response schema the monitoring platform's
+> evaluation pipeline no longer understands, because the chatbot's own smoke test only checks the
+> chatbot's own contract, not what monitoring currently expects.
+>
+> Concretely: say the chatbot ships v58 with a formatting regression and gets rolled back to v55 — a
+> fast, routine slot-swap-back that reports success because v55's own contract is intact. But
+> `citations[]` was introduced in v56 specifically because monitoring v41's groundedness scoring reads
+> that field. Monitoring is untouched by the rollback — still v41, still expecting `citations[]` — so
+> every conversation the rolled-back chatbot produces from that point is missing a field the monitoring
+> pipeline depends on, and depending on how defensively that parsing was written, the model-risk
+> dashboard's hallucination-rate trend line can quietly spike for a window that's actually a
+> version-compatibility artifact, not a real quality regression. The chatbot's own pipeline reported a
+> clean, successful rollback the entire time — it had no way to know it had just broken something two
+> services away.
+>
+> The manual stopgap today is a compatibility matrix and a `/version`-endpoint cross-check across all
+> three services — the pieces exist, they're just advisory, not enforced, and they typically run after
+> the fact rather than blocking anything. The design I'd actually build is a release manifest — a small,
+> versioned artifact per client recording the current triple of service versions — validated against a
+> compatibility matrix as the last stage of a platform-level release pipeline that runs after each
+> service's own pipeline, and that gate applies to rollbacks exactly the same way it applies to forward
+> deploys, so a bad combination gets caught before it serves traffic instead of after someone notices
+> the dashboard looks wrong. And the fix doesn't stop at CI/CD — the monitoring platform itself needs
+> every conversation event tagged with the chatbot version that produced it, so it can interpret a
+> version boundary correctly instead of quietly averaging incompatible data into one trend line."
+
+**The precise distinction worth drawing under follow-up pressure:** "this service's own rollback
+succeeded" (its own build/test/deploy/smoke-test pipeline went green) is a completely different question
+from "the resulting platform-wide combination of all three services' versions is one that's actually
+safe" — the first is what chapter 04's rollback mechanics answer, the second is a combinatorial question
+no single service's pipeline can answer on its own.
+
+**Follow-ups to be ready for (drawing on chapter 07):**
+
+- *"How would a bug like that actually get caught in your pipeline today, before this fix exists?"* —
+  Only after the fact, and only if someone notices — the honest answer is that a false-positive-looking
+  clean rollback is exactly the kind of failure chapter 07 calls out as the most dangerous class: it
+  looks identical to success. The closest thing to an early-warning signal today is a manual
+  `/version`-endpoint check, run on a schedule, not release-blocking.
+- *"What's the actual failure mode if two of these services' rollout pipelines try to update the release
+  manifest at the same time?"* — A real concurrency trap, covered in chapter 07: without an
+  optimistic-concurrency check on the manifest write (version the manifest, write only if it hasn't
+  changed since you read it), the second writer can silently overwrite the first writer's update with a
+  manifest computed from stale data — the same class of problem Terraform's own state locking exists to
+  prevent, just one layer up.
+- *"Is this the same problem as Terraform state drift?"* — No, and it's worth drawing that line
+  precisely: state drift (chapter 07's bug narrative 2) is infrastructure Terraform believes exists no
+  longer matching what's actually deployed; the version-compatibility gap here is about *application*
+  versions across independently-deployed services being mutually incompatible even though each one's own
+  infrastructure and deploy are perfectly healthy. Related failure family — both are "environment
+  drift" — but different mechanisms, different fixes, and conflating them under interview pressure is
+  exactly the mistake worth avoiding.
 
 ---
 
 ## Behavioral (STAR-based)
 
-### Q1. Tell me about a time you automated a manual deployment process.
+### Q2. Tell me about a time you automated a manual deployment process.
 
 **A.** *(STAR — same shape as the course's main summary; practice this version under 90 seconds.)*
 **Situation:** At Capco, the chatbot assistant and document-uploader services I built were being
@@ -23,7 +90,7 @@ Deployment time for a routine change dropped from about half a day to under 15 m
 deployments dropped noticeably once tests and smoke checks were gating every release automatically
 instead of relying on manual verification.
 
-### Q2. Describe a deployment that went wrong. What did you do?
+### Q3. Describe a deployment that went wrong. What did you do?
 
 **A.** Frame a plausible, honest-sounding scenario rather than claiming a specific proprietary
 incident: a deploy passed all automated checks but a downstream client-specific configuration value
@@ -34,7 +101,7 @@ version a one-command operation with no user-facing downtime, and the follow-up 
 that class of config to the smoke test (a `/health` check that also validates required config is
 present) so the same failure mode is caught automatically next time, not just fixed once.
 
-### Q3. How did you decide what to automate first when you started building the pipeline?
+### Q4. How did you decide what to automate first when you started building the pipeline?
 
 **A.** Start with the highest-frequency, highest-risk manual step — for these services, that was the
 build-and-deploy cycle itself, since it happened on every change and every manual deploy was a chance
@@ -49,7 +116,7 @@ before a client would be comfortable with prod deploys running through it at all
 
 ## Technical Deep-Dive
 
-### Q4. How do you handle secrets in a CI/CD pipeline?
+### Q5. How do you handle secrets in a CI/CD pipeline?
 
 **A.** Secrets never live in the YAML file or in application config committed to Git. In Azure
 DevOps: secrets go into **variable groups** (optionally backed by Azure Key Vault, so the pipeline
@@ -63,7 +130,7 @@ application setting holding a secret string — so even the running app never ha
 credential to leak, just an Azure-issued identity token. The combined effect: no secret is ever
 plaintext in Git, pipeline logs, or app configuration.
 
-### Q5. Blue-green vs. canary deployment — when would you pick one over the other?
+### Q6. Blue-green vs. canary deployment — when would you pick one over the other?
 
 **A.** Blue-green (implemented via Azure App Service deployment slots) gives an instant, clean,
 all-or-nothing cutover with a near-instant rollback (swap back) — I'd pick it for changes that are
@@ -76,7 +143,7 @@ worse answers) wouldn't necessarily show up in a smoke test but would show up in
 real usage. The tradeoff is operational complexity — canary needs traffic-splitting and real-time
 monitoring infrastructure that blue-green via slots doesn't.
 
-### Q6. How does Terraform state locking prevent conflicts?
+### Q7. How does Terraform state locking prevent conflicts?
 
 **A.** Terraform state is the source of truth for what infrastructure it believes exists. If two
 `terraform apply` runs execute concurrently against the same state — say, a developer running apply
@@ -91,7 +158,7 @@ place per environment (the pipeline, not also from developer laptops), and if yo
 the right response is to wait or investigate a stuck lock — never to force-unlock without confirming
 no other apply is actually in progress.
 
-### Q7. Walk me through what happens, stage by stage, when a pull request merges to main.
+### Q8. Walk me through what happens, stage by stage, when a pull request merges to main.
 
 **A.** Merge to `main` fires the **CI trigger**. Build stage installs dependencies, runs lint, runs
 the unit/integration test suite, and publishes results. If that's green, a security/dependency scan
@@ -106,7 +173,7 @@ pauses at an **approval gate** configured on the prod Environment resource — a
 change (and the `terraform plan` diff, if infra changed) and approves before the final deploy and
 smoke test execute against production.
 
-### Q8. How would you pipeline-gate an LLM-backed app to catch a bad prompt or config change before it reaches production?
+### Q9. How would you pipeline-gate an LLM-backed app to catch a bad prompt or config change before it reaches production?
 
 **A.** Two things have to be true first: prompts, system messages, and retrieval config (top_k,
 temperature, model deployment name) need to be version-controlled files that go through the same PR
@@ -125,7 +192,7 @@ explicit, reviewed Terraform/config value (chapter 01/03) so a model upgrade is 
 that goes through the same gate, not something that happens silently via portal-managed deployment
 settings.
 
-### Q9. What's the difference between a service connection and a variable group in Azure DevOps, and why do you need both?
+### Q10. What's the difference between a service connection and a variable group in Azure DevOps, and why do you need both?
 
 **A.** A service connection is an *authentication* bridge — it lets the pipeline act as an identity
 against an external system (an Azure subscription, a container registry, GitHub) without the pipeline
@@ -139,7 +206,7 @@ its own variable group (holding only their environment's config), so a pipeline 
 by both can safely deploy the same service to different clients without any risk of Client A's
 pipeline touching Client B's resources.
 
-### Q10. Why is trunk-based development generally preferred over GitFlow for a fast-iterating service like an LLM chatbot?
+### Q11. Why is trunk-based development generally preferred over GitFlow for a fast-iterating service like an LLM chatbot?
 
 **A.** GitFlow's long-lived `develop`/`release` branches optimize for infrequent, scheduled releases
 where stabilizing a release branch independently from ongoing feature work makes sense. A chatbot
@@ -151,7 +218,7 @@ rather than by branch structure) keeps integration continuous, which is the enti
 built on — the earlier a change is integrated and tested against everyone else's changes, the cheaper
 problems are to find and fix.
 
-### Q11. How do you validate infrastructure changes before they hit a shared environment?
+### Q12. How do you validate infrastructure changes before they hit a shared environment?
 
 **A.** `terraform plan` is the primary tool — it computes and displays the exact diff (adds, changes,
 destroys) against the real environment's tracked state without applying anything, and that plan output
@@ -169,7 +236,7 @@ if asked how you'd catch configuration drift over time, not just at deploy time.
 
 ## System Design
 
-### Q12. Design a CI/CD pipeline for a multi-client consulting team where each client has an isolated Azure subscription.
+### Q13. Design a CI/CD pipeline for a multi-client consulting team where each client has an isolated Azure subscription.
 
 **A.** Structure the design around **isolation as the primary constraint**, then reuse as the
 secondary goal:
@@ -201,7 +268,7 @@ The overall shape: **one pipeline definition, many isolated invocations** — is
 *which credentials and state the pipeline is parameterized with per run*, not in duplicated pipeline
 logic per client, which is what keeps the system maintainable as the client roster grows.
 
-### Q13. How would you extend this pipeline to support rolling back an LLM model version specifically, as opposed to a code rollback?
+### Q14. How would you extend this pipeline to support rolling back an LLM model version specifically, as opposed to a code rollback?
 
 **A.** Treat the model deployment name/version as a **pinned, versioned configuration value** managed
 the same way as infrastructure (a Terraform variable or a version-controlled config file consumed at
@@ -209,7 +276,7 @@ deploy time — see chapter 01/03), not as portal-managed state. That makes a mo
 normal, reviewed, artifact-versioned deployment like any other, which means the same rollback
 mechanisms already covered apply directly: redeploy the previous config value through the pipeline
 (fast, minutes, same mechanism as redeploying a previous Docker image tag), or — if the model swap
-was rolled out via canary (Q5/Q8) — simply stop advancing the canary's traffic percentage and route
+was rolled out via canary (Q6/Q9) — simply stop advancing the canary's traffic percentage and route
 back to the previous model deployment, which is nearly instant since both versions are already live
 side by side during a canary rollout. The key design point: a model version should never be a
 "we changed it in the Azure OpenAI portal and hoped" event — it should be exactly as observable,
@@ -217,16 +284,61 @@ diffable, and rollback-able as a code deploy.
 
 ---
 
+## Production Resilience and Pipeline Bug Narratives
+
+### Q15. Tell me about a specific CI/CD bug you'd expect to find in a multi-client pipeline like this one.
+
+**A.** *(Illustrative — chapter 07 has four, this is the strongest single one to lead with.)* A
+copy-pasted template parameter: when a new client-specific setting is added by copying one client's
+deploy-stage block (`DeployHSBC`) to create the other's (`DeployBofA`), it's easy to update the obvious
+parameters — service connection, app name — and miss one, like `variableGroup`, still pointing at the
+first client's secrets. The result deploys correctly to the second client's App Service and its own
+service connection, but with the first client's Key Vault URI and connection strings injected as app
+settings — a real cross-tenant secret leak, and one both deploys report as a clean success. The fix that
+actually catches this isn't better code review of the YAML — it's an automated post-deploy assertion
+that checks the *resolved identity* of what was injected (does the Key Vault URI in Bank of America's
+app settings actually contain "bofa," not "hsbc") rather than only checking that the deploy succeeded.
+That distinction — checking identity, not just outcome — is the one worth leading with.
+
+### Q16. What's the most dangerous kind of pipeline failure, and why?
+
+**A.** The ones that look identical to success. A build failure, a failed test, a failed `terraform
+plan` — all of these stop the pipeline and announce themselves loudly, and recovery is cheap because
+nothing was deployed yet. Far more dangerous: a `terraform apply` run with `-refresh=false` that
+silently no-ops because it never re-queried a resource someone changed out-of-band in the Portal, or a
+smoke test that keeps passing after a URL refactor because it's still hitting a stale route that happens
+to return `200` for unrelated reasons. Both report a clean, green pipeline while the real, intended
+change silently failed to take effect or the real regression went unchecked. The practical takeaway:
+invest as much scrutiny in what a smoke test's assertions actually check (response body shape, not just
+status code) and in never skipping a state refresh against shared infrastructure, as in the deploy
+mechanics themselves — because the failure that costs the most is the one nobody notices until
+something downstream depends on the thing that silently didn't happen.
+
+### Q17. What's one hardening gap in this pipeline you'd name candidly rather than claim is solved?
+
+**A.** The requirement that a `terraform plan` showing an unexpected `destroy` on a stateful resource
+(a database, a Key Vault) gets manually reviewed before approval is enforced by reviewer diligence and
+team convention today, not by an automated policy gate — nothing actually inspects the plan's JSON
+output and blocks the approval step if it contains a destroy on a resource type known to hold live data.
+The fix is well-understood and not exotic — an Open Policy Agent/Conftest-style check, or even a script
+parsing `terraform show -json` (the same shape notebook `02_terraform_basics_demo.ipynb` and the new
+plan-diff safety-gate notebook both work with), run as a required, blocking stage before the approval
+gate. The honest framing: this wasn't automated because it felt like more upfront investment than the
+number of actual close calls justified — but it's a known, well-scoped gap, and I'd prioritize it the
+moment "a reviewer missed an unexpected destroy" stopped being hypothetical.
+
+---
+
 ## Retrospective
 
-### Q14. What would you change if you rebuilt this pipeline today?
+### Q18. What would you change if you rebuilt this pipeline today?
 
 **A.** A few concrete improvements, framed honestly as hindsight rather than as things that were
 necessarily wrong the first time: (1) **Policy-as-code for infrastructure** — adding an automated
 policy check (e.g., an Open Policy Agent/Conftest check on `terraform plan` output) that blocks
 merges introducing non-compliant resources (a public-facing storage account, a missing tag) instead
 of relying entirely on human review of the plan diff. (2) **A proper LLM eval gate in the pipeline
-itself** (Q8) rather than relying only on manual testing before a prompt/config change ships — wiring
+itself** (Q9) rather than relying only on manual testing before a prompt/config change ships — wiring
 an automated Ragas-style evaluation suite (as covered in course 02) as a required pipeline stage, not
 an optional pre-merge habit. (3) **Ephemeral PR environments** — spinning up a short-lived, fully
 isolated environment per pull request (rather than only dev/staging/prod as fixed environments) so a
@@ -234,15 +346,21 @@ reviewer or the client can click a live preview link during code review, tearing
 on merge/close, which shortens the feedback loop even further than "deploy to shared dev on merge."
 (4) **Tighter cost guardrails** — since LLM-backed services have a runtime cost profile
 (token usage) that traditional web services don't, adding a cost/usage check to the smoke-test or
-canary-monitoring step, not just uptime/latency. None of these are "the original pipeline was wrong" —
-they're the natural next layer of maturity once the foundational build/test/deploy/gate discipline
-this course covers is already in place.
+canary-monitoring step, not just uptime/latency. (5) **The release-manifest design from chapter 06** —
+today, the chatbot, monitoring, and uploader services roll back independently and safely on their own
+terms, but nothing checks whether the resulting combination of all three versions is one that's actually
+known to work together (Q1). A versioned, atomically-deployed release manifest, validated against a
+compatibility matrix as the last stage of a platform-level release pipeline, is the concrete next step —
+and it's the one improvement on this list that isn't really optional once a second or third
+cross-service compatibility incident actually happens, rather than staying hypothetical. None of these
+are "the original pipeline was wrong" — they're the natural next layer of maturity once the foundational
+build/test/deploy/gate discipline this course covers is already in place.
 
 ---
 
 ## Client & Production Context (HSBC / Bank of America)
 
-### Q15. You deployed the same platform pattern for two banking clients, HSBC and Bank of America — how did the pipeline keep their environments, secrets, and deployments completely isolated from each other?
+### Q19. You deployed the same platform pattern for two banking clients, HSBC and Bank of America — how did the pipeline keep their environments, secrets, and deployments completely isolated from each other?
 
 **A.** Isolation was enforced at every layer the pipeline touches, not just one: **(1) Compute** —
 each bank got its own Azure App Service instance (and its own resource group), so there was never a
@@ -265,7 +383,7 @@ scoped per client, never shared. That combination — same template, completely 
 the practical answer to "how do you serve two competitors from one platform without either knowing
 the other exists."
 
-### Q16. How would you design a rollback strategy for a customer-facing bank chatbot deploy that goes wrong during business hours?
+### Q20. How would you design a rollback strategy for a customer-facing bank chatbot deploy that goes wrong during business hours?
 
 **A.** The design has to assume the failure will be noticed by real users, not caught quietly in
 staging, so speed and blast-radius containment matter more than root-causing the bug in the moment.
@@ -288,7 +406,7 @@ afterthought. The mechanism that makes all of this fast is preparation, not impr
 warm, immutable versioned artifacts, and per-client isolation are all decisions made *before* the
 incident, not during it.
 
-### Q17. What pipeline gates would you add specifically because the target system serves real bank customers, that you wouldn't necessarily need for an internal tool?
+### Q21. What pipeline gates would you add specifically because the target system serves real bank customers, that you wouldn't necessarily need for an internal tool?
 
 **A.** An internal tool's pipeline can usually get away with build, test, and a smoke test. A
 system serving real HSBC or Bank of America customers through Azure Front Door/App Gateway, Azure AD,
@@ -314,7 +432,7 @@ teaches, just aimed at validating the production topology (edge, network, identi
 observability) instead of only the application code, because for a bank's customer-facing system,
 all five of those are as capable of causing a real incident as a code bug is.
 
-### Q18. Did switching the target service from Flask to FastAPI change anything about the pipeline itself?
+### Q22. Did switching the target service from Flask to FastAPI change anything about the pipeline itself?
 
 **A.** Barely. The document-uploader service (course 03) is built with **FastAPI**, **SQLAlchemy** as
 the ORM, and RBAC via **MSAL/OAuth 2.0** against Azure AD — and the honest answer is that almost none

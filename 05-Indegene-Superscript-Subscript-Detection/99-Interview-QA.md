@@ -1,7 +1,10 @@
 # 99 — Interview Q&A
 
-Read this last, once Chapters 00–05 are fresh. Questions are grouped behavioral -> technical ->
-system design -> retrospective, roughly the order a real interview tends to escalate.
+Read this last, once Chapters 00–07 are fresh. Questions are grouped behavioral -> technical ->
+system design -> retrospective, roughly the order a real interview tends to escalate, with one
+"gotcha" question (Q2) positioned early and deliberately — it's the question most likely to expose
+whether a candidate has actually thought through this pipeline's lifecycle or is only describing its
+happy path.
 
 ---
 
@@ -23,7 +26,48 @@ needed a different kind of model entirely.
 
 ---
 
-### 2. (Behavioral) Why did you choose a multi-stage pipeline instead of one end-to-end model?
+### 2. (Gotcha) If a corrected re-scan of a document comes back through the pipeline, how do you avoid double-counting its citations?
+
+**Answer:** Honestly — as built, this pipeline doesn't avoid that today. Every document that lands
+in S3 triggers a brand-new run of the full OCR-YOLO-CNN pipeline, and there's no check anywhere in
+that flow for "have I already produced a structured citation output for this document before." A
+resubmission — say, an MLR reviewer asks for a page to be rescanned because it was too blurry for
+OCR to read a footnote reliably — produces a **second, independent set of citation detections**
+sitting alongside the first, with nothing linking them. The workaround that exists today is entirely
+manual and operator-driven: someone finds the prior output for that document, marks it stale in
+whatever system tracks MLR review status, and lets the resubmission process fresh. That works, but
+only if someone remembers to do it every time.
+
+It's also worth being precise that there are two genuinely different things hiding inside "the
+document came in again," and conflating them is a mistake: **a genuinely new document** — different
+content that's never been processed — where fresh processing from scratch is exactly correct
+behavior, versus **a corrected re-scan of something already processed** — same underlying claims and
+citations, different input bytes (higher-DPI rescan, recompressed export, a deskew fix) — where fresh
+processing isn't *wrong*, it's just redundant and produces an unwanted duplicate. The pipeline can't
+currently tell these apart at all; both look identical to Stage 1, which just sees "a new image
+arrived."
+
+If I were building a real fix, I'd add a cheap dedup check ahead of the expensive three-stage
+pipeline: an exact SHA-256 hash of the input bytes to catch true duplicate re-uploads outright (skip
+reprocessing, return a pointer to the existing output), and a perceptual hash (a difference hash over
+the decoded image, compared by Hamming distance) tolerant of the kind of change a corrected re-scan
+actually introduces, to flag likely revisions as a "probably supersedes an existing job" signal —
+with a human confirming the supersede relationship before anything gets marked stale, since a
+similarity threshold is a heuristic, not a certainty, and I'd rather over-process a document than
+silently drop or merge one that turned out to be genuinely different content. I'd tag every citation
+record with a `source_document_version` field — which input hash and which model version produced
+it — so "this citation's source document changed" and "this citation's scoring model changed" (a
+related but distinct concern, see Q19 below) are both attributable, not conflated. And I'd want this
+to reach past this pipeline's own database: if there's an MLR reporting layer or a citation-search
+surface downstream — and there almost certainly is — a duplicated detection set there means
+double-counted compliance metrics or a search result surfacing stale, superseded citation content.
+The full reasoning behind this is in `06-document-reprocessing-and-citation-deduplication.md`, and
+`notebooks/05_content_hash_reprocessing_demo.ipynb` runs the exact-hash/perceptual-hash/supersede
+logic end to end against synthetic images.
+
+---
+
+### 3. (Behavioral) Why did you choose a multi-stage pipeline instead of one end-to-end model?
 
 **Answer:** Because the three sub-problems — general text/layout extraction, small-object
 localization, and fine-grained visual classification — have different data requirements, different
@@ -37,7 +81,7 @@ that stage specifically.
 
 ---
 
-### 3. (Technical) Why not just use OCR font-size heuristics instead of a full detection+classification pipeline?
+### 4. (Technical) Why not just use OCR font-size heuristics instead of a full detection+classification pipeline?
 
 **Answer:** That's essentially what the ~5% baseline was, and it fails for a few concrete reasons.
 First, most OCR output doesn't preserve font size and vertical baseline offset as clean, per-glyph
@@ -54,7 +98,7 @@ diversity a rule-based heuristic doesn't.
 
 ---
 
-### 4. (Technical) How do you handle class imbalance when superscripts are a tiny fraction of all characters?
+### 5. (Technical) How do you handle class imbalance when superscripts are a tiny fraction of all characters?
 
 **Answer:** This shows up at both Stage 2 and Stage 3. For the YOLO detector, I'd make sure the
 training set includes deliberately-curated hard negatives — page numbers, exponents, subscripts,
@@ -72,7 +116,7 @@ always predicts "false positive" could still show high raw accuracy while being 
 
 ---
 
-### 5. (Technical) Walk me through IOU and non-max suppression — why does YOLO need NMS at all?
+### 6. (Technical) Walk me through IOU and non-max suppression — why does YOLO need NMS at all?
 
 **Answer:** IOU (intersection over union) is the overlap ratio between two boxes — intersection area
 divided by union area, 0 to 1. YOLO needs NMS because its grid-based design means multiple nearby
@@ -88,7 +132,7 @@ NMS from scratch in numpy — walking through that is in
 
 ---
 
-### 6. (Technical) YOLOv5 vs. newer YOLO versions (v8, v10, etc.) — what are the trade-offs?
+### 7. (Technical) YOLOv5 vs. newer YOLO versions (v8, v10, etc.) — what are the trade-offs?
 
 **Answer:** The core single-shot, grid-based idea is shared across the family; what's changed
 version to version is mostly the detection head, the anchor strategy, and training-time
@@ -109,7 +153,7 @@ production pipeline that's already working.
 
 ---
 
-### 7. (Technical) Why add a CNN classifier after YOLO instead of just improving YOLO's own classification head or raising its confidence threshold?
+### 8. (Technical) Why add a CNN classifier after YOLO instead of just improving YOLO's own classification head or raising its confidence threshold?
 
 **Answer:** Raising YOLO's confidence threshold directly trades recall for precision *inside a
 single model that's also responsible for localization* — you can't tune that trade-off
@@ -124,7 +168,7 @@ can't specialize on to the same degree.
 
 ---
 
-### 8. (Technical) How would GPT-4 Vision (or a general vision-language model) change this pipeline if you rebuilt it today?
+### 9. (Technical) How would GPT-4 Vision (or a general vision-language model) change this pipeline if you rebuilt it today?
 
 **Answer:** A modern VLM like GPT-4V could plausibly collapse Stages 2 and 3 (and arguably part of
 Stage 1) into a single prompted call: "here's a cropped text-line image, identify any citation-style
@@ -148,7 +192,7 @@ pipeline wholesale on day one.
 
 ---
 
-### 9. (Technical) How is Sagemaker used in a pipeline like this?
+### 10. (Technical) How is Sagemaker used in a pipeline like this?
 
 **Answer:** AWS Sagemaker is a natural fit for both training and hosting the two learned models here.
 For training: Sagemaker Studio/Training Jobs give managed, scalable compute for training the YOLO
@@ -162,7 +206,7 @@ workflow rather than purely as an offline batch job.
 
 ---
 
-### 10. (Technical) What's the difference between text detection and text recognition in OCR, and why does that distinction matter here?
+### 11. (Technical) What's the difference between text detection and text recognition in OCR, and why does that distinction matter here?
 
 **Answer:** Detection finds *where* text is (bounding boxes/regions); recognition decodes *what* the
 text says, given a region known to contain it. The distinction matters here because Stage 1's
@@ -175,7 +219,7 @@ OCR's contribution to this pipeline is geometry as much as it is text.
 
 ---
 
-### 11. (System Design) Design this to run at scale over millions of pages with acceptable latency and cost.
+### 12. (System Design) Design this to run at scale over millions of pages with acceptable latency and cost.
 
 **Answer:** I'd treat this as a batch/offline pipeline rather than a synchronous request-response
 system, since citation tracking doesn't need sub-second latency per page — a few seconds to
@@ -202,11 +246,13 @@ minutes of end-to-end processing per document is acceptable if throughput is hig
   one stage (e.g., a new document source with unusual fonts hurting OCR recall) is caught before it
   silently degrades the end-to-end citation-tracking number.
 - **Idempotency & retry**: given a queue-based architecture, each page-processing job should be
-  idempotent (safe to reprocess) since at-least-once delivery is typical for SQS-style queues.
+  idempotent (safe to reprocess) since at-least-once delivery is typical for SQS-style queues — see
+  Q18 below for the concrete concurrency risk this addresses and Chapter 06/07 for the proposed
+  content-hash-based fix.
 
 ---
 
-### 12. (System Design) How would you monitor this system in production and know when it's degrading?
+### 13. (System Design) How would you monitor this system in production and know when it's degrading?
 
 **Answer:** Per Chapter 04, I'd monitor at least three signal types: (1) **per-stage proxy metrics**
 on a small, continuously-refreshed labeled sample — OCR word-detection rate, YOLO candidate-recall
@@ -214,14 +260,16 @@ against known citation locations, CNN precision/recall on candidates — so a re
 attributed to a specific stage; (2) **distributional drift signals**, like a sudden shift in the
 volume of YOLO candidates per page or in average OCR confidence scores, which can flag a new,
 unfamiliar document source (e.g., a new client's slide template, or lower-quality scans) before
-accuracy metrics even catch up; and (3) **downstream business metrics** — e.g., how often a human
+accuracy metrics even catch up — this is exactly the signal that would have surfaced Chapter 07's
+"confidence threshold left at a debug value" bug much sooner than a human noticing the MLR review
+queue had gotten unusually large; and (3) **downstream business metrics** — e.g., how often a human
 reviewer in the MLR workflow overrides or flags a citation the pipeline reported (or missed) — as
 the ground-truth signal that actually reflects the business-level "citation tracking accuracy"
 number from the résumé, closing the loop between the offline eval and real-world performance.
 
 ---
 
-### 13. (Retrospective) What would you change if you rebuilt this today?
+### 14. (Retrospective) What would you change if you rebuilt this today?
 
 **Answer:** A few things. First, I'd seriously evaluate collapsing Stages 2 and 3 using a modern
 vision-language model (GPT-4V or similar) for at least the harder/ambiguous candidates, as discussed
@@ -234,11 +282,15 @@ candidates pre- and post-NMS, CNN confidence per candidate) to make error attrib
 than only having the final end-to-end number to debug from. Third, I'd push harder on active
 learning for the annotation pipeline — since true superscripts are rare, prioritizing human
 annotation effort on the CNN's lowest-confidence or most-disagreed-upon candidates would make far
-better use of a limited labeling budget than uniformly sampling documents to annotate.
+better use of a limited labeling budget than uniformly sampling documents to annotate. Fourth, I'd
+build the content-hash dedup check and the `source_document_version`/model-version tagging from
+Chapter 06/07 in from day one rather than as a retrofit — both are the kind of thing that's cheap to
+design in up front and genuinely annoying to bolt onto a system that's already processed months of
+untagged, unlinked output.
 
 ---
 
-### 14. (Retrospective) What was the hardest part of getting from 5% to 85%, technically?
+### 15. (Retrospective) What was the hardest part of getting from 5% to 85%, technically?
 
 **Answer:** Almost certainly the transition from "OCR text + heuristic" to "treat this as a
 computer-vision detection-and-classification problem" — that's a bigger conceptual jump than any
@@ -253,7 +305,7 @@ architectural decision.
 
 ---
 
-### 15. (Technical) How would you evaluate whether the YOLO stage or the CNN stage is the bigger bottleneck if end-to-end accuracy plateaus?
+### 16. (Technical) How would you evaluate whether the YOLO stage or the CNN stage is the bigger bottleneck if end-to-end accuracy plateaus?
 
 **Answer:** I'd break the end-to-end error down using the per-stage metrics from Chapter 04: run
 YOLO alone against a labeled validation set and measure recall — if YOLO is missing a meaningful
@@ -267,7 +319,7 @@ stage rather than requiring a guess-and-retrain-everything approach.
 
 ---
 
-### 16. (System Design) This ran in production for two pharma clients, Eli Lilly and AstraZeneca — how did you keep their content and processing pipelines isolated on AWS?
+### 17. (System Design) This ran in production for two pharma clients, Eli Lilly and AstraZeneca — how did you keep their content and processing pipelines isolated on AWS?
 
 **Answer:** The same pipeline code and the same trained YOLO/CNN models served both clients — I
 wasn't maintaining two separate codebases — but the *data* and *access* were isolated at the
@@ -288,7 +340,7 @@ than rely on "our code is correct" as the only thing standing between the two cl
 
 ---
 
-### 17. (System Design / Behavioral) Why did the 5%→85% accuracy improvement matter enough to justify a three-stage ML pipeline instead of a simpler heuristic, given this was going to real clients?
+### 18. (System Design / Behavioral) Why did the 5%→85% accuracy improvement matter enough to justify a three-stage ML pipeline instead of a simpler heuristic, given this was going to real clients?
 
 **Answer:** Because the cost of getting it wrong wasn't an abstract accuracy number, it was a
 compliance risk sitting on top of real client content. Every citation this pipeline tracks (or
@@ -309,7 +361,7 @@ engineering complexity of three coordinated models was worth it here.
 
 ---
 
-### 18. (System Design) How would you scale this on ECS Fargate + Sagemaker to handle a sudden spike in document volume from one client without affecting the other client's processing SLA?
+### 19. (System Design) How would you scale this on ECS Fargate + Sagemaker to handle a sudden spike in document volume from one client without affecting the other client's processing SLA?
 
 **Answer:** The key design choice is to make capacity scale **per client, independently**, rather
 than sharing one undifferentiated pool that both clients draw from — otherwise Eli Lilly uploading a
@@ -331,3 +383,57 @@ burst silently starving the other's throughput. The underlying principle is the 
 S3/IAM isolation in the question above: shared code and shared models are fine, but capacity,
 queues, and monitoring need to be scoped per client wherever a resource could otherwise become
 contended between two customers who have no visibility into or control over each other's usage.
+
+---
+
+### 20. (Technical, follow-up to Q2) Under an at-least-once queue like SQS/EventBridge, could the same document actually get processed twice by two different workers — and would you even notice?
+
+**Answer:** Yes, and this is worth being direct about rather than assuming a batch system is
+idempotent just because it's queue-based. If a worker task is evicted mid-processing (a Fargate spot
+interruption, a rolling deploy) without cleanly acknowledging its queue message, the message's
+visibility timeout expires and a second worker can pick up and process the exact same document —
+both workers unaware of each other, potentially both completing and both writing a structured
+citation output for the same document. Whether you'd *notice* depends entirely on whether anything
+downstream is checking for duplicate output per document — and per Chapter 07, absent a shared
+idempotency check at job pickup, nothing does today. The practical fix is the same content-hash check
+proposed in Chapter 06 for resubmitted documents: if every worker checks a shared processed-document
+index before running the expensive pipeline stages, a duplicate delivery resolves to a cheap no-op.
+Short of that, a lightweight distributed claim-check per `document_id` (first worker to claim a row
+in a shared table wins; a second delivery is a no-op) is the narrower fix. The honest answer is that
+today this system is not *provably* idempotent under retry — it's a real, named gap, not a solved
+problem, and `07-production-resilience-and-operational-engineering.md`'s concurrency section covers
+the reasoning in full.
+
+---
+
+### 21. (Technical, follow-up to Q2) A retrained CNN gets redeployed to the same Sagemaker endpoint — what stops a batch of old-model and new-model results from getting silently compared as if they came from the same system?
+
+**Answer:** Nothing, unless the deployment pipeline and the output schema both enforce it — which is
+exactly the bug Chapter 07 walks through: a retrained model redeployed under the same endpoint
+name/alias without a version identifier means every citation record produced afterward is
+indistinguishable, in the data, from one produced by the old model. If an accuracy sample audit then
+shows a shift, there's no way to attribute it to the model change versus a new document source or
+sampling noise, because nothing recorded says which model produced which detection. The fix is
+structural, not procedural: make the model-version fields inside `source_document_version` (Chapter
+06) a required, non-nullable part of the output schema, and make the deployment pipeline itself
+reject any model push that doesn't carry a version identifier — so it's impossible to produce an
+untraceable citation record, rather than relying on a human to remember to tag every deploy. This is
+the model-version half of the same underlying problem Q2 covers for the document-version half: a
+citation record has to be traceable to *both* the source document version and the model version that
+produced it, and conflating "which axis changed" is exactly the mistake to avoid.
+
+---
+
+### 22. (System Design, follow-up to Q2) If you found the false-positive-flood bug from a debug confidence threshold in production, how would you have caught it before a human noticed the MLR review queue backing up?
+
+**Answer:** By monitoring candidate volume per page as a distributional signal, not waiting on
+accuracy metrics or human complaints to surface it (Chapter 07, bug #2, and Q13 above). A confidence
+threshold left at a debug value doesn't crash anything — the pipeline keeps running and keeps
+producing plausible-looking output, just many times more Stage 2 candidates than expected, each one
+costing a Stage 3 Sagemaker call. A simple CloudWatch alarm on "candidates-per-page relative to a
+trailing historical baseline" would have flagged a multi-x jump within the first batch it ran on,
+long before it showed up as either a cost spike or a human reviewer noticing more flagged citations
+than usual. More broadly, this is why Chapter 07 argues for required, environment-scoped
+configuration rather than defaults that "happen to" be safe — a debug threshold should never be able
+to reach production silently in the first place, which is a stronger fix than only catching it after
+deployment via monitoring.

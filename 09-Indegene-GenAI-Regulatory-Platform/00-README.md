@@ -20,7 +20,7 @@ audience and each with its own regulatory purpose:
 |---|---|---|
 | **ICF** — Informed Consent Form | Trial participants (patients) | Explains the trial, its risks and benefits, and what participation involves, in language a layperson can understand *before* they legally consent to join |
 | **PLPS** — Plain Language Protocol Synopsis | Patients, patient advocacy groups, lay reviewers, public registries | A simplified summary of the full Protocol, stripped of clinical jargon |
-| **SOC** — Summary of Changes | Investigators, ethics committees (IRB/IEC), regulators | A structured record of exactly what changed between one Protocol version (amendment) and the previous one |
+| **SOC** — Summary of Changes | Investigators, ethics committees (IRB/IEC), regulators | A structured record of exactly what changed between one Protocol version (amendment) and the previous one — see chapter 06 for how this module's core purpose ties directly into protocol-amendment/document-revision handling, the strongest analog in this whole curriculum to "how do you handle a revised version of a document" |
 | **Country Specific Protocol Comparison** | Regulatory affairs, local trial sites | Shows how a country's local regulatory requirements or site-specific addenda diverge from the global Protocol |
 
 Every one of these is currently produced largely by hand: a medical writer reads the (amended)
@@ -185,10 +185,12 @@ flowchart LR
 | [03-open-source-llms-llama3-deployment.md](03-open-source-llms-llama3-deployment.md) | Why LLaMA 3 over a closed API, self-hosting/quantization/serving, tradeoffs vs. Azure OpenAI/AWS Bedrock |
 | [04-document-comparison-with-graphdb-and-cypher.md](04-document-comparison-with-graphdb-and-cypher.md) | Graph modeling of protocol sections, GraphDB fundamentals, Cypher query patterns |
 | [05-building-instruction-based-generation-pipelines.md](05-building-instruction-based-generation-pipelines.md) | Prompt templates per section type, schema-constrained output, factual grounding, human-review gate |
+| [06-protocol-amendment-versioning-and-document-revision-handling.md](06-protocol-amendment-versioning-and-document-revision-handling.md) | The "revised document" question, answered through this platform's own SOC module: what happens today when a Protocol is amended, the SOC-diffs-textually-not-graph-based gap, the SOC-accuracy-vs-dependent-staleness distinction, a `protocol_version` propagation and dependency-tracking design, rapid-amendment/version-chain handling, and why a version bump is never a review fast-path |
+| [07-production-resilience-and-operational-engineering.md](07-production-resilience-and-operational-engineering.md) | Real error-handling table (what hard-blocks a document vs. what's just logged), a concurrent-amendment version-race caveat, four candid bug-found-and-fixed stories, concrete Sagemaker LLaMA 3 timeout/retry/scaling values, one named hardening gap |
 | [99-Interview-QA.md](99-Interview-QA.md) | Interview question bank |
 
 Notebooks live in [`notebooks/`](notebooks/) and are runnable, fully offline, synthetic-data
-companions to chapters 01, 02, 04, and 05 (no API keys, GPU, or model downloads required).
+companions to chapters 01, 02, 04, 05, 06, and 07 (no API keys, GPU, or model downloads required).
 
 ## 6. STAR summary
 

@@ -192,11 +192,15 @@ automated regulatory/MLR citation-tracking workflows on real pharma content.
 | `03-cnn-classification-architectures.md` | CNN fundamentals, why a second-stage classifier reduces false positives, transfer learning |
 | `04-building-the-sequential-pipeline.md` | Architecting multi-stage pipelines, error propagation, whole-pipeline vs. per-stage evaluation, defining "accuracy" here |
 | `05-opencv-image-preprocessing.md` | Binarization, deskew, contour detection, ROI cropping, and how preprocessing quality feeds OCR/detection accuracy |
+| `06-document-reprocessing-and-citation-deduplication.md` | The honest answer to "what if a corrected re-scan of a document comes back through the pipeline" — today's non-idempotent reprocessing, the manual workaround, the "new document" vs. "corrected re-scan" distinction, and a proposed content-hash dedup + `source_document_version` design |
+| `07-production-resilience-and-operational-engineering.md` | Per-stage error handling (halt vs. degrade gracefully), a batch-worker concurrency/idempotency caveat, four CV-pipeline-specific bug stories, concrete threshold/timeout/batch-size values, and one candidly-named hardening gap |
 | `99-Interview-QA.md` | Behavioral, technical, system-design, and "rebuild it today" interview Q&A |
-| `notebooks/` | Four runnable, offline, synthetic-data notebooks — one per major concept |
+| `notebooks/` | Six runnable, offline, synthetic-data notebooks — one per major concept, plus the reprocessing-dedup and model-version-tagging notebooks for Chapters 06–07 |
 
 Read in order — each chapter builds on the last, and the notebooks are meant to be run alongside the
-chapter with the matching number.
+chapter with the matching number. As with the rest of this course, Chapters 06 and 07 are a
+plausible, technically detailed reconstruction, not a claim about verified internal Indegene
+implementation details — see each chapter's opening note for the honesty framing.
 
 > **Confidentiality note**: as covered in the root `README.md`'s "Client & Production Context"
 > section, check what your actual NDA/engagement letter allows before naming Eli Lilly or

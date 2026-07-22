@@ -143,6 +143,8 @@ loop" is itself a documented finding an auditor will flag.
 | `03-explainable-ai-shap-lime-shapash.md` | SHAP, LIME, Shapash — explainability for audit and accuracy/completeness checks |
 | `04-robustness-adversarial-and-safety-testing.md` | Perturbation testing, prompt injection / bad-actor testing, harmfulness classification, reliance/engagement signals |
 | `05-building-a-monitoring-dashboard.md` | Turning per-response metrics into a Power BI/Tableau dashboard with alerting and feedback loops |
+| `06-baseline-staleness-and-drift-lifecycle.md` | The "what happens when the assistant changes" gotcha: rolling-baseline staleness vs. genuine drift, and a proposed baseline-versioning fix tied to an assistant version tag |
+| `07-production-resilience-and-operational-engineering.md` | Evaluator error-handling table, concurrency/race caveats, illustrative bug narratives, concrete timeout/retry/threshold values, and a named hardening gap |
 | `99-Interview-QA.md` | Interview questions + model answers |
 | `notebooks/` | Runnable from-scratch implementations of the ideas above |
 

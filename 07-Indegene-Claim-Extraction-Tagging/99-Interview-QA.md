@@ -1,9 +1,15 @@
 # 99 — Interview Q&A: Claim Extraction & Tagging
 
-Read this last, after chapters 00–06 are fresh. Questions are grouped behavioral → technical deep-dive
+Read this last, after chapters 00–08 are fresh. Questions are grouped behavioral → technical deep-dive
 → system design → retrospective. Model answers are written in first person as a template — adapt the
 specifics (numbers, exact tools) to what you actually remember from the real project, and treat the
 STAR summary in `00-README.md` as your 90-second version of question 1.
+
+**Q1a below is the gotcha question** — the analog, for this project, of the real "how do you handle
+revised document versions" question the Capco Document Uploader course was built around. It's placed
+right after the standard project-overview question, deliberately ahead of the rest of the technical
+deep-dives, because it's the one most likely to expose whether you've actually thought past "the model
+works" into "the model works *and stays correct as the source of truth underneath it changes*."
 
 ---
 
@@ -24,6 +30,76 @@ of reading every asset end-to-end.
 
 *(Follow-up to expect: "what was your specific role vs. the team's?" — have a clear, honest answer
 ready about which module(s) you owned most directly.)*
+
+---
+
+### 1a. (The gotcha) If the approved-claims library gets revised, how do you make sure the Content Comparator doesn't keep matching against a withdrawn claim?
+
+This is the question worth having fully internalized before it comes up — the full worked answer lives
+in chapter 07 (`07-approved-library-versioning-and-stale-comparison.md`); this is the compressed,
+interview-ready version:
+
+> "A realistic implementation of the approved-claims library the Content Comparator checks against is,
+> by default, a flat, mutable table — there's no versioning built in, and no link between a claim's old
+> wording and its revised wording. When legal revises or withdraws a claim, nothing automatically goes
+> back and re-examines content that was already approved against the old version, and depending on how
+> the comparator's similarity index gets refreshed, there can even be a window where new content is
+> still being matched against a claim's stale text after the underlying row has already changed.
+>
+> What you *can* do without a schema change is a manual workaround: once legal flags a claim as
+> withdrawn, someone queries which previously-approved content matched that specific claim and re-queues
+> it for review. That only works at all, though, if the original comparator result was recorded
+> claim-by-claim — `matched_claim_id`, not just a pass/fail boolean — otherwise the workaround degrades
+> into re-running the comparator against the entire content archive.
+>
+> It's also worth being precise that 'textually similar to an approved claim' and 'similar to a claim
+> that's still *currently* approved' are two different questions. A similarity index has no innate
+> notion of currency unless claim status is explicitly wired into it as a filter — a vector is a vector,
+> whether it came from a claim approved three years ago or one legal pulled yesterday. Conflating those
+> two is exactly how a withdrawn claim keeps quietly 'supporting' new content.
+>
+> If I were building this properly, I'd add a `claim_family_id` and a `claim_version`/
+> `superseded_by_claim_id` to the approved-claims schema, so 'what's the current wording of this claim'
+> and 'what's its revision history' become well-defined queries instead of ambiguous lookups. I'd record
+> `matched_claim_id` and `matched_claim_version` on every comparator result instead of a boolean, so
+> withdrawing a claim can directly and automatically re-flag everything that was approved on the
+> strength of it. And I'd split the similarity index itself into an 'active-only' index that gates new
+> content and a separate full historical index used only for audit, so a match that only shows up in the
+> historical index is immediately visible as 'this cites something no longer current' rather than
+> silently passing as supported.
+>
+> This reaches into the retraining pipeline too — if a retrained model or a rebuilt comparator index gets
+> evaluated against a stale cached snapshot of the approved library, it can pass its evaluation gate
+> cleanly while being validated against withdrawn wording. So the retraining pipeline's data-validation
+> stage needs to explicitly check that its reference snapshot is at least as current as the library's
+> last revision before it runs, not just assume it is."
+
+**Follow-ups to be ready for (drawing on chapter 08):**
+
+- *"So could a piece of content ship today citing a claim that's already been withdrawn?"* — Yes, and
+  worth saying plainly: if the comparator's active/historical index split and the claim-by-claim match
+  logging aren't both in place, there's no automatic mechanism to catch it — it depends entirely on
+  someone manually noticing and re-checking. That's a real gap, not a theoretical one.
+- *"Walk me through the mixed-model-version scenario from chapter 08 — how is that related?"* — Related
+  but distinct: the library-staleness problem is about the *data* (the approved claims) going stale
+  underneath a comparator that keeps running; the model-version-cache problem is about the *model*
+  itself — a warm Lambda execution environment can keep routing requests to a Sagemaker endpoint's old
+  `target_model` path for a while after a retraining pipeline promotes a new version, because the
+  execution environment only re-reads the "current version" pointer on cold start. Both are the same
+  underlying category of bug — something that's supposed to reflect "current truth" quietly serving
+  stale truth instead — just at two different layers (data vs. model artifact).
+- *"How would you even detect that a batch of results came from a mix of model versions?"* — Only if
+  every classification result is stamped with the model version that actually produced it, read off the
+  real `target_model` value the call resolved to, not the version the deployment step intended to be
+  live. `notebooks/07_model_version_tag_propagation_demo.ipynb` implements exactly this pattern — without
+  that stamp, a mixed-version batch is invisible, not just hard to detect.
+- *"Which of the two problems is worse for this kind of platform — stale library or stale model?"* — The
+  stale-library case, because it directly determines whether a specific piece of *published* content is
+  still correctly supported — its blast radius includes content that's already out the door. A stale
+  model version affects the marginal quality of a small window of in-flight classifications, which the
+  human review queue is still sitting behind as a safety net (chapter 08's fail-closed error-handling
+  table); a stale approved-claims match can leave already-approved content silently unsupported with no
+  queue standing behind it at all, unless the re-flagging design in chapter 07 is actually built.
 
 ---
 
@@ -290,6 +366,15 @@ to serve as a small fine-tuned classifier than as an LLM call. I'd also invest e
 override-rate monitoring and human-in-the-loop feedback loop (question 14) — that's the kind of
 infrastructure that pays for itself over the system's lifetime and is easy to under-invest in early on
 in favor of just shipping the first model.
+
+Two more specific, concrete changes, each argued in depth elsewhere in this course: **(1) real
+approved-claim versioning** (chapter 07) — a `claim_family_id` and `claim_version`/
+`superseded_by_claim_id` on the approved-claims schema, plus claim-by-claim match logging on every
+comparator result, so withdrawing a claim can automatically re-flag everything approved on the strength
+of it, instead of relying on someone remembering to go looking. **(2) model-version stamping on every
+classification result** (chapter 08) — so a retraining promotion's mixed-version window (some warm
+Lambda environments still routing to the outgoing Sagemaker model version for a while after a "new model
+deployed" signal) is a directly queryable, auditable fact instead of an invisible one.
 
 ---
 

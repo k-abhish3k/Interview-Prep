@@ -167,8 +167,10 @@ the next stage.
 | `03-object-detection-metrics-iou-map-tpr.md` | IOU computation, IOU thresholds, TPR/recall, precision-recall curves, mAP — unpacking "96% TPR at IOU 0.85" |
 | `04-serverless-model-deployment-lambda-api-gateway.md` | Lambda deployment for deep learning models, container images, cold starts, API Gateway, TensorFlow Serving/Rekognition alternatives |
 | `05-bonus-gans-and-super-resolution-srgan.md` | GAN fundamentals, adversarial vs. pixel-wise loss, SRGAN, single-image super-resolution applied to video |
+| `06-detection-deduplication-and-model-version-drift.md` | The "revised document / retrained model" chapter: reprocessed-document dedup, model-version attribution drift, a proposed `detection_runs` design (content-hash dedup + `model_version` stamping) |
+| `07-production-resilience-and-operational-engineering.md` | Error-handling table (retry vs. fail-fast vs. degrade gracefully), the shared-Lambda-concurrency cross-client caveat, four object-detection-deployment bug narratives, concrete memory/timeout/threshold values, one named hardening gap |
 | `99-Interview-QA.md` | Behavioral, technical, system-design, and "rebuild it today" interview Q&A |
-| `notebooks/` | Five runnable, offline, synthetic-data notebooks — one per major concept |
+| `notebooks/` | Seven runnable, offline, synthetic-data notebooks — one per major concept |
 
 Read in order — each chapter builds on the last, and the notebooks are meant to be run alongside the
 chapter with the matching number.

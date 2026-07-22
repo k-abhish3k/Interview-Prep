@@ -1,405 +1,289 @@
 # 99 — Interview Q&A: Document Uploader Service
 
-Read this last, once chapters 01–05 and the notebooks are fresh. Questions are grouped by type;
-in a real interview they'll be mixed together, often as follow-ups to each other.
+Read this last, once chapters 01–08 and the notebooks are fresh. Questions are grouped by type; in a
+real interview they'll be mixed together, often as follow-ups to each other. **Q1 is the actual
+question the candidate was asked in a real interview about this project** — it comes first,
+deliberately, ahead of the general behavioral warm-up questions.
+
+---
+
+## Q1. For revised versions of the same document, how are you handling those?
+
+This is the real question. The full worked answer lives in chapter 05
+(`05-document-lifecycle-versioning-and-revisions.md`) — this is the compressed, interview-ready version:
+
+> "Today, there's no versioning in this system — every upload, in every department, creates a
+> brand-new document with a brand-new ID; there's no title-based dedup or supersede logic anywhere in
+> the upload path. I confirmed that directly by reading the upload handler — every call goes through
+> `INGEST_API`'s batch-initialize-then-ingest flow and gets back a fresh document ID every time, with no
+> lookback for an existing document with the same title.
+>
+> What you *can* do today, with existing endpoints, is a manual three-step workaround: search by title
+> and business line to find the stale version, remove it via the existing delete endpoint, then upload
+> the revision. The pieces all exist and already work — the gap is that it's entirely client-driven,
+> not automated or enforced, and you lose the original document ID in the process, so anything that
+> referenced it breaks.
+>
+> It's also worth being precise that this is a different concern from the approval workflow one of our
+> departments (IWPB) has — that state machine tracks whether one specific upload has been approved and
+> is within its retention window, not whether it's the current revision of a document that's had
+> several versions. Those are two different axes and I'd be careful not to conflate them.
+>
+> If I were building real revision tracking, I'd add a `document_group_id` and a
+> `supersedes_document_id` to the document model, so 'get the latest version' and 'show me the revision
+> history' become well-defined queries instead of ambiguous title searches. But that only solves half
+> the problem — the ingestion API this service calls doesn't have a version concept either today, so a
+> complete fix needs that system to understand versioning too. And if there's a search index behind
+> retrieval downstream of this — which is likely — a real revision feature also needs to retire the old
+> version's index entry when a new one supersedes it, otherwise you've solved the bookkeeping problem
+> but a RAG system on top could still serve stale content."
+
+**Follow-ups to be ready for:**
+
+- *"So nothing stops two people uploading conflicting revisions right now?"* — Correct, and worth
+  saying plainly: there's no locking, no "someone else already revised this" check, nothing. The manual
+  workaround is entirely coordination-by-convention.
+- *"Would you say that's a gap in the system?"* — Yes, honestly: it's a gap that was never in scope for
+  the work that was actually delivered (the IWPB approver workflow), not an oversight within that
+  scope. Naming it as "out of scope for what was asked" rather than "a bug I missed" is accurate and
+  more credible than either overclaiming it's handled or apologizing for it.
+- *"How would you prioritize building that vs. other things?"* — A reasonable answer: it depends on
+  how often revisions actually happen and how costly a stale duplicate is downstream (a stale search
+  result surfaced in a RAG answer is a real, painful failure mode) — worth quantifying with real usage
+  data before committing to the two-layer fix (this service + `INGEST_API`) described above.
 
 ---
 
 ## Behavioral
 
-### Q1. Tell me about the Document Uploader Service you built at Capco.
+### Q2. Tell me about the Document Uploader Service you built at Capco.
 
-Use the STAR summary from `00-README.md` as your skeleton, under 90 seconds:
+Use the STAR summary from `00-README.md`, under 90 seconds: *Situation* — HSBC needed document
+ingestion across several business lines, with IWPB specifically needing human approval, an audit
+trail, and expiry-driven retention that no other department needed. *Task* — extend an existing FastAPI
+service with an IWPB-only approver workflow without disturbing the other departments' working flow.
+*Action* — built `iwpb_workflow.py` as a separate module with its own SQL table, staged uploads in
+Blob Storage (not local disk, so it survives restarts and works across scaled-out instances), SMTP
+notification to mapped approvers, a background `asyncio` sweep for reminders/auto-removal/purge with
+independent error isolation per responsibility, and a separate, relationship-based authorization
+pattern for approver identification — while finding and fixing several real bugs along the way (a
+startup-crashing import typo, a silent `NameError` breaking search for every other department, two
+email-template key mismatches). *Result* — a real, auditable approval and retention lifecycle for
+IWPB with zero disruption to the other five departments' existing flow.
 
-*Situation* — documents feeding the client's internal knowledge base were being collected manually,
-with no audit trail or status tracking. *Task* — build an end-to-end uploader/ingest service with full
-CRUD functionality, deployed on the client's Azure environment. *Action* — designed a REST API around
-a `documents` resource, built it in **FastAPI** with Pydantic validation and a dependency-injection
-system for database sessions and auth, used **SQLAlchemy** as the ORM for the data layer, enforced
-**RBAC via MSAL/OAuth 2.0** against Azure AD on every endpoint, containerized it with a multi-stage
-Docker build, deployed to Azure App Service with an Azure Function handling async post-upload
-processing, and moved secrets into Key Vault with managed identity access.
-*Result (illustrative)* — cut manual onboarding time by roughly 70% and gave the team a reliable,
-auditable ingestion path feeding the chatbot's knowledge base.
+### Q3. Describe a technical decision on this project you'd defend, and one you'd reconsider.
 
-Keep the "illustrative" numbers labeled as such if asked directly what you measured versus estimated —
-honesty about which numbers are real versus defensible estimates reads as more credible than a
-suspiciously precise made-up figure.
+**Defend:** staging IWPB uploads in **Azure Blob Storage rather than local/App Service disk**.
+`REQUIREMENTS.md`'s Implementation Notes confirm local-disk staging was the *initial* implementation,
+deliberately replaced with Blob Storage specifically so staged files survive a restart and are visible
+from every scaled-out App Service instance without depending on the `/home` file share. That's a real
+example of catching a horizontal-scaling problem before it shipped, not after.
 
-### Q2. Describe a technical decision on this project you'd defend, and one you'd reconsider.
+**Reconsider:** the `memory_cache` bearer-token cache and the `_iwpb_maintenance_loop` background task
+are both per-process, not shared/coordinated across scaled-out instances (chapter 06) — unlike the
+Blob/DB decision above, these weren't revisited before shipping. Worth naming candidly as the kind of
+thing you'd fix given more time, with the specific fixes (a shared cache, an Azure Functions Timer
+trigger or a distributed lock) already identified rather than vague.
 
-**Defend:** choosing to split the workload between Azure App Service (synchronous upload API) and
-Azure Functions (async post-upload processing) rather than doing everything synchronously in one
-FastAPI request handler. This kept upload latency low and predictable regardless of how slow downstream enrichment (OCR,
-indexing) got, and let each piece scale independently.
+### Q4. How did you handle a real bug you found in this service?
 
-**Reconsider:** if the service started as a single synchronous endpoint that did validation, storage,
-*and* text extraction inline (a reasonable MVP shortcut), that's worth naming as something you'd
-split out earlier next time — it's a realistic version of "moved fast initially, paid a small
-refactor cost later," which is a more credible answer than claiming everything was architected
-perfectly from day one.
-
-### Q3. How did you handle a production issue or bug in this service?
-
-Structure any real (or plausible, clearly-framed) incident with STAR: what broke (e.g., a retrying
-client created duplicate document rows because uploads weren't idempotent), how you diagnosed it
-(logs/Application Insights showing repeated `POST`s with identical file content in a short window),
-what you changed (added idempotency-key support, described in chapter 01), and the outcome (duplicate
-uploads eliminated, verified via monitoring over the following weeks).
-
----
-
-## Technical Deep-Dive
-
-### Q4. How do you handle large file uploads without blocking the request thread?
-
-Two layers to this answer. First, within the request itself: FastAPI's `UploadFile` already spools to
-disk past a size threshold rather than holding the whole upload in memory, and `await file.read()`/
-streaming the underlying `SpooledTemporaryFile` straight to blob storage avoids ever materializing a
-large file as one in-memory `bytes` object; a request-size guard (checked early via `Content-Length` or
-a small ASGI middleware) rejects oversized payloads before the handler does real work, similar in
-intent to Flask's `MAX_CONTENT_LENGTH` but implemented explicitly rather than via a framework config
-key. Second, and more importantly: don't do slow *processing* (OCR, extraction, indexing) inside the
-upload request at all — accept the file, persist it, write a metadata row with `status="uploaded"`, and
-return `201` immediately. An Azure Function triggered on blob creation does the slow work
-asynchronously, and the client polls or gets notified when `status` becomes `"ready"`. This is the
-async pattern from chapter 01 combined with the App Service/Functions split from chapter 04 — the
-request is never blocked on anything slower than a storage write, and because the path operation is
-`async def`, the worker process isn't even blocked *waiting* on that write — it can serve other
-requests while the `await` is in flight.
-
-### Q5. How would you make this endpoint idempotent?
-
-`POST /documents` isn't idempotent by default — a retried request naively creates a duplicate. Fix:
-require an `Idempotency-Key` header from the client (a UUID generated per upload attempt, not per
-retry). On receiving a request, check a lookup table (or a unique constraint) for that key; if it's
-been seen, return the original response instead of reprocessing; if not, process normally and record
-the key with the result, with a reasonable TTL (e.g., 24 hours) so the table doesn't grow unbounded.
-Worth noting under follow-up: `PUT`, `GET`, and `DELETE` are idempotent *by design* in this API (chapter
-01's REST verb table) — it's specifically `POST` (create) that needs this extra mechanism.
-
-### Q6. Managed Identity vs. storing secrets in Key Vault directly — what's the difference?
-
-Storing a secret *in* Key Vault solves where the secret's value lives (centralized, encrypted,
-audited, rotatable) — but the app still needs to authenticate *to* Key Vault to retrieve it, and if
-that authentication itself uses a hardcoded credential, you've just relocated the original problem one
-level up. Managed Identity solves that second half: Azure assigns the App Service/Function an identity
-in Entra ID with no credential a developer ever sees, grants that identity access to the vault, and the
-Azure SDK (`DefaultAzureCredential`) acquires tokens transparently. The combination — secrets
-centralized in Key Vault, retrieved via managed identity — is what removes hardcoded credentials from
-the system end-to-end; either piece alone is incomplete.
-
-### Q7. How would you version this API?
-
-For an internal service with a small number of known consumers (an admin UI, the indexing pipeline),
-URI versioning (`/v1/documents`, `/v2/documents`) is the pragmatic choice — explicit in logs, easy to
-route at the App Service level, trivial to test with curl, no content-negotiation logic required on
-either side. Header versioning (`Accept: application/vnd.app.v2+json`) keeps URLs cleaner but adds
-complexity that isn't justified for a small internal consumer set. Whichever scheme, the discipline
-that matters more than the choice itself: never make a breaking change to `v1` in place — ship `v2`
-alongside it and give consumers a migration window.
-
-### Q8. Walk me through what happens, end to end, when a client uploads a document.
-
-Client sends `POST /v1/documents` as `multipart/form-data` with a file part and a JSON metadata part,
-including an `Idempotency-Key` header. FastAPI validates the request through the path operation's typed
-parameters — file present (`UploadFile`), metadata matching the `DocumentCreate` Pydantic model — before
-any business logic runs, then `Depends(get_current_user)` validates the caller's Azure AD-issued token
-and `Depends(require_role("DocumentUploader.Write"))` checks their RBAC role claim (chapter 06). Once
-authenticated and authorized, it streams the file to Azure Blob Storage, inserts a metadata row via the
-SQLAlchemy `DocumentRepository` (`status="uploaded"`, audit columns populated, `tenant_id` resolved from
-the token, never client input), and returns `201 Created` with the new document's ID and a `Location`
-header. Blob creation fires an event; an Azure Function with a blob trigger picks it up, runs enrichment
-(e.g., Cognitive Services Document Intelligence for OCR), and updates the SQL row's `status` to
-`"ready"` or `"failed"`. Downstream, an indexing process (course 01's territory) picks up `"ready"`
-documents and feeds them into the chatbot's search index. All secrets used along the way (SQL connection
-string, storage key) come from Key Vault via managed identity — nothing is hardcoded.
-
-### Q9. Why FastAPI over Flask for this service?
-
-Four concrete reasons, not just "it's newer": **async support** — the upload endpoint spends most of its
-time waiting on I/O (blob storage, SQL, Key Vault, Graph API), and `async def` path operations let one
-worker process handle many concurrent requests during those waits instead of blocking a thread per
-request. **Pydantic validation built in** — request/response shapes are declared once as typed models
-instead of a separate schema library bolted onto the framework, and invalid input is rejected with a
-structured `422` before it reaches business logic, which measurably reduces the boilerplate and the
-class of bugs that comes from manually checking `if "field" not in request.json`. **Automatic OpenAPI
-docs** — for a service that other systems inside a bank need to integrate against (an admin UI, the
-chatbot's indexing pipeline, potentially other backend teams), a live, always-accurate interactive schema
-is a real integration accelerant over a hand-maintained API doc that drifts out of date. **The
-dependency-injection system fits the auth/DB-session pattern cleanly** — `Depends(get_db)`,
-`Depends(get_current_user)`, and `Depends(require_role(...))` compose independently and declaratively on
-each path operation (chapters 02 and 06), instead of authentication/session logic being manually wired
-into every route or handled by a decorator stack.
-
-### Q9a. Why SQLAlchemy ORM instead of raw SQL here?
-
-Maintainability — a `Document` model declared once is the single source of truth for the table's shape,
-instead of every hand-written query independently getting the column list right and silently drifting as
-the schema evolves. Migration support via **Alembic** — schema changes are versioned, diffable, and
-applied consistently across dev/staging/prod instead of hand-written `ALTER TABLE` scripts with no
-tooling enforcing convergence. Reduced injection surface — SQLAlchemy's query-building API
-(`select(Document).where(...)`) generates parameterized SQL by construction, so there's no
-string-concatenation step where a caller-supplied value could end up embedded in SQL text. The honest
-caveat: a hand-tuned raw query can still outperform the ORM's generated SQL on the hottest, most
-performance-critical paths, and that's not a reason to avoid the ORM everywhere — SQLAlchemy's `text()`
-construct is a legitimate escape hatch for that specific query, still parameterized and safe, without
-giving up the ORM for the other 95% of the data layer.
-
-### Q10. How do you prevent SQL injection in the metadata queries?
-
-Every value that comes from a caller (filter parameters, IDs, filenames) goes through SQLAlchemy's
-query-building API (`select(Document).where(Document.created_by == user)`) rather than string-formatted
-SQL — the ORM parameterizes by construction, so there's no code path where a value gets concatenated
-into the SQL text. Where a raw query is used deliberately (a hand-tuned hot-path query via `text()`), it
-still uses bound parameters (`text("... WHERE created_by = :user").bindparams(user=user)`), with no
-exceptions — "just this one internal admin query" is exactly the exception that becomes an incident.
-This is demonstrated concretely in `notebooks/02_sql_data_layer_demo.ipynb`, including a side-by-side of
-the vulnerable string-formatted query versus the parameterized/ORM-built one.
+Pick one of the four from chapter 06/`REQUIREMENTS.md` and walk it with STAR — the `NameError` one is
+the strongest, most concrete example: *what broke* — `search_ingested_documents()` referenced an
+undefined variable `h` instead of `INGEST_API`, raising a `NameError` on every call; *impact* — both the
+"Waiting to be ingested" and "Ingested Documents" tables were silently broken for every non-IWPB
+department; *how found* — code review while implementing the IWPB feature, reading the existing
+function it had to coexist with; *fix* — one-line correction to `INGEST_API`; *what would catch it
+earlier* — a basic integration test against a mocked `INGEST_API` asserting the search endpoint returns
+`200`, since this is exactly the class of bug that only manifests at runtime, not in isolated unit logic.
 
 ---
 
-## System Design
+## Real Departments, RBAC, and Feature Flags
 
-### Q11. Design this service to handle 10x the current document volume.
+### Q5. What are the actual business lines/departments this service supports?
 
-Work through each layer:
+**IWPB, FEMA, TPMB, and GTRM**, plus a generic bucket (RESEARCH, WCS, GPS, WCL, OTHER, GENERAL) with no
+dedicated role. **There is no "Credit Ops"** — if that name surfaces from memory, correct it in the
+moment. IWPB is the only one with an approval workflow; the other three are direct, unmediated proxies
+to `INGEST_API`, gated by AAD roles (`stitt.ingester`, `.pilot`, `.tpmb`, `.gtrm`) and feature flags
+(chapter 03 has the full table).
 
-- **API layer (App Service):** already stateless, so scale out horizontally with autoscale rules on
-  CPU/request queue length — no code changes needed since no session state lives in the app process.
-- **Upload path:** keep the accept-fast/process-async split (chapter 01) strict — at 10x volume, any
-  synchronous processing still in the request path becomes the first bottleneck.
-- **Blob storage:** effectively unlimited horizontal scale already; make sure blob naming avoids hot
-  partitions (e.g., avoid sequential timestamp-prefixed names if using a storage account with
-  partition-key-sensitive throughput limits).
-- **Azure Functions:** consumption plan autoscales with event volume, but check downstream
-  dependencies it calls (Cognitive Services, the SQL database) for their own throughput limits —
-  Functions scaling out doesn't help if it just moves the bottleneck downstream.
-- **SQL:** this is usually the real constraint at 10x. Check the indexes from chapter 05 are actually
-  serving the hot-path queries (status lookups, pagination), consider read replicas if reads
-  (status polling, listing) dominate over writes, and confirm connection pooling is configured so 10x
-  more Function/App Service instances don't exhaust the database's max connections.
-- **Idempotency table:** make sure the TTL-based cleanup keeps this from growing linearly with volume
-  forever.
+### Q6. Walk me through the `/role-check` logic — how does a user's role become a list of visible business lines?
 
-The meta-point worth stating explicitly: because the architecture already separates concerns (API vs.
-async processing vs. storage vs. metadata), scaling 10x is mostly "turn the dial on each piece
-independently and find the new bottleneck," not "redesign the system" — that's the payoff of having
-made the App Service/Functions split in the first place.
+Map each AAD role the user holds to its business line (`stitt.ingester → IWPB`, `.pilot → FEMA`, `.tpmb
+→ TPMB`, `.gtrm → GTRM`). If `FEATURE_THIRD_PARTY_BOT` is on **and** the user holds all three of
+`stitt.ingester`/`.pilot`/`.tpmb`, return `[IWPB, FEMA, TPMB]` directly. If `FEATURE_GREEN_TIME` is on
+**and** the user holds all four roles, return `[IWPB, FEMA, TPMB, GTRM]`. Otherwise, return the sorted
+list from the direct one-role-per-line mapping. The key nuance: TPMB and GTRM aren't just "one more
+role" — they require holding every role beneath them in the hierarchy *and* their own feature flag
+being on, which reads as a deliberate progressive-rollout pattern layered on top of AAD role
+assignment. `notebooks/04_role_to_business_line_rbac_demo.ipynb` implements this exact algorithm and
+exercises it against several role-set/flag combinations.
 
-### Q12. How would you add multi-tenancy (multiple client organizations sharing this service)?
+### Q7. Why one shared service instead of a microservice per department?
 
-Add a `tenant_id` column to the `documents` table (and every other table), include it in every index
-(`(tenant_id, status, created_at)` rather than just `(status, created_at)`), and enforce it in every
-query at the repository layer — never trust a client-supplied tenant ID without validating it against
-the authenticated identity (resolved via Microsoft Graph / Entra ID, chapter 05). At the storage layer,
-either prefix blob paths with `tenant_id/` or use separate storage containers per tenant if isolation
-requirements are stricter (some compliance regimes require physical, not just logical, separation).
-Worth flagging as a follow-up question to ask the interviewer back: "what level of tenant isolation
-does this need — logical (shared DB, tenant_id column) or physical (separate databases/containers per
-tenant)?" — the two have very different cost and complexity implications, and asking shows you
-understand the tradeoff exists.
+The departments differ enormously in how much state they actually need: IWPB genuinely warrants its
+own module (which is what it got — `iwpb_workflow.py`, its own SQL table, its own background job)
+while FEMA/TPMB/GTRM are thin, near-identical proxies sharing one `if` branch's worth of difference from
+the generic departments. Splitting into four services would have meant four deployment pipelines, four
+sets of Application Settings, and either duplicating or awkwardly sharing the `INGEST_API` client and
+`/role-check` logic across service boundaries — for departments that don't hold any state of their own
+to protect from each other. The one place isolation genuinely matters (IWPB's extra complexity) already
+has it, at the module level, without needing a service boundary: `iwpb_workflow.py` only ever touches
+`IWPBDocumentWorkflow`, so a bug there can't corrupt a FEMA/TPMB/GTRM upload even inside the same
+process. Chapter 03 has the full argument, including the case *for* splitting them, argued fairly.
 
-### Q13. How would you monitor and alert on this service in production?
+### Q8. Is the department/business-line RBAC in this service the same thing as the "4 Azure AI Search indexes per department" retrieval setup you've mentioned elsewhere?
 
-Application Insights (or equivalent) for request-level telemetry — latency percentiles, error rates by
-status code, and custom events for the async pipeline's stage transitions (`uploaded -> processing ->
-ready/failed`), since a rising count of documents stuck in `"processing"` for too long is a real signal
-of a stuck or failing Function. Alert on: elevated 5xx rate on the API, elevated Function execution
-failures, documents stuck in `"processing"` past a threshold (e.g., 15 minutes), and Key Vault access
-failures (a strong signal of a misconfigured managed identity or an expiring access policy).
+No, and it's important not to conflate them. This service's RBAC (`/role-check`) fully controls which
+departments a user can upload to and see in this app — that's confirmed, real, and covered in chapter
+03/04. Whatever HEXA or a downstream retrieval layer does with per-department search indexes and
+access control is **not visible in this repository** — this service's job stops at handing a file to
+`INGEST_API`. The honest, defensible connection: the department entitlement data this service already
+computes is exactly the kind of signal a downstream per-department search-ACL model would need to
+consume, but that's a statement about what would naturally connect, not a claim about code that exists
+in this codebase.
+
+---
+
+## Authentication, RBAC, and the Manual-OAuth-vs-MSAL Nuance
+
+### Q9. Does this service use MSAL for OAuth 2.0 authentication?
+
+Not for the part most people assume — user sign-in is a **hand-rolled authorization-code exchange**:
+`app.py` builds the Azure AD `/authorize` redirect URL by hand and exchanges the returned `code` for a
+token via a raw `requests.post` to the `/token` endpoint, not via `msal.PublicClientApplication` or any
+MSAL authorization-code helper. MSAL (`msal.ConfidentialClientApplication`) *is* used, but for two
+narrower things: **on-behalf-of** token acquisition (`acquire_token_on_behalf_of`, to call the
+feature-flag Config Service using the signed-in user's own token) and **client-credentials** token
+acquisition (`acquire_token_for_client`, for the IWPB background purge job, which runs with no user in
+the loop). Getting this right — naming the split instead of saying "MSAL handles OAuth" — is a stronger,
+more precise answer. Chapter 04 has the full breakdown with the actual code for each of the three
+mechanisms.
+
+### Q10. How does this service know a caller's roles — does it validate a JWT the standard way?
+
+Not quite — this is worth being precise about. `utils.get_user_role` decodes the
+`x-ms-token-aad-id-token` header with `jwt.decode(..., options={"verify_signature": False})` —
+explicitly unverified. There's no signature check, `aud` check, `iss` check, or `exp` check on this
+token inside this app's own code. The design relies on a trust boundary upstream of this FastAPI
+process — the header is the kind Azure App Service's built-in "Easy Auth" or a gateway would inject
+after already validating the identity — so the honest answer is: this app trusts that whatever sits in
+front of it has already verified the token and guarantees the header can't be spoofed by an external
+caller; it does not independently re-verify that itself.
+
+### Q11. IWPB has an "approver" concept — is that the same as an AAD role?
+
+No — and this is a good one to volunteer as a nuance. Business-line **visibility** (can a user even see
+IWPB in their dropdown) is role-based RBAC, driven by the `stitt.ingester*` AAD app roles. Whether a
+specific user can **approve or decline an IWPB document for a given business line** is a completely
+separate, **relationship-based** pattern: their email (from a different header,
+`x-ms-client-principal-name`) has to match `approver1_email_id`/`approver2_email_id` in an `ACTIVE` row
+of the `approver_mapping` SQL table for that business line. No AAD role governs approver status at all
+— it's entirely data-driven, self-service through `/save-approver-details`, with no distinct admin
+role even gating who can set it. Chapter 04 has the full comparison table.
+
+### Q12. How would you test the RBAC/role-check logic without hitting real Azure AD in CI?
+
+`role_to_business_line` and the feature-flag gating logic are pure functions of `(user_roles,
+feature_flags)` once the JWT is decoded — they don't need a real token at all to unit test, just a
+Python list of role strings and a couple of booleans, exactly as demonstrated in
+`notebooks/04_role_to_business_line_rbac_demo.ipynb`. The one part that *does* need care in testing is
+`get_user_role`'s unverified `jwt.decode` call — since it never validates a signature, a test can hand
+it a locally-constructed, entirely unsigned token and it will decode successfully, which is itself worth
+demonstrating in a test as a way of documenting the trust-boundary assumption explicitly, rather than
+leaving it implicit.
+
+---
+
+## Production Resilience and Scaling
+
+### Q13. This service can scale to multiple App Service instances — what breaks, and what doesn't?
+
+Two things behave differently under scale-out, and it's worth naming both without conflating them.
+**Blob Storage and Azure SQL are shared and safe** — any instance can serve an approve/decline for a
+document staged by any other instance, because neither depends on local process/disk state. **Two
+things are per-process and *not* shared**: the `memory_cache` bearer-token cache (a session's cached
+token only exists on the instance that handled sign-in — a request routed to a different instance
+forces re-login) and `_iwpb_maintenance_loop` (every instance runs its own independent hourly sweep
+against the same database). The maintenance-loop risk is bounded — worst case is a duplicate reminder
+email, never data corruption, since every write in the sweep is an idempotent SQL `UPDATE`. Fixes for
+both are concrete: a shared cache (Redis) or session affinity for the token cache; an Azure Functions
+Timer trigger or a distributed lock for the maintenance loop. Chapter 06 has the full detail.
+
+### Q14. Tell me about two bugs you found and fixed in this service.
+
+Pick two from chapter 06's four. Strongest pair: **(1)** the top-level `import paridas as pd` typo —
+a misspelled, non-existent package import that would crash the *entire app's startup* on redeploy, not
+just the one endpoint that used it; caught by basic static analysis/linting or a CI import smoke-test.
+**(2)** the blank Title column in every IWPB approver email — `email_utils._document_rows_html()`
+looked up `doc.get('title', '')` but every caller's dict used the key `document_title`, so the single
+most important field for an approver deciding what to review was blank on every notification, reminder,
+and auto-removal email; caught by a template-rendering test using a realistic fixture (the actual dict
+shape `_row_to_dict()` produces), not a hand-typed convenient one. The pattern worth naming across both:
+neither was caught by an automated test, because the non-IWPB paths and the email templates had no
+integration or rendering test coverage at all — a concrete, specific answer to "what would you add"
+rather than a generic "more tests."
+
+### Q15. How would you monitor and alert on this service in production?
+
+Beyond generic latency/error-rate monitoring: alert on documents stuck in `PENDING_APPROVAL` past a
+reasonable window (a signal the SMTP notification or the reminder sweep itself is failing silently —
+both are best-effort and swallow their own exceptions, chapter 06), alert on the expiry-purge step being
+skipped repeatedly (logged clearly when `INGEST_API_SCOPE` is missing or token acquisition fails — a
+string worth alerting on directly), and specifically watch for **duplicate reminder emails to the same
+recipient within the same window** as the concrete, observable symptom of the background-loop
+not-a-singleton caveat actually manifesting under real scale-out, rather than staying theoretical.
+
+---
+
+## Secrets, Config, and Deployment
+
+### Q16. Is this service's configuration in Key Vault?
+
+No — confirmed from the real deployment docs: it's in **Azure App Service Application Settings**
+(environment variables), with `.env` explicitly local-dev-only. Managed Identity *is* real, but it's
+used for Blob Storage access (`DefaultAzureCredential` against the storage account), not for retrieving
+secrets from a vault. If asked to propose an improvement: migrate the genuine plaintext secrets —
+`MICROSOFT_PROVIDER_AUTHENTICATION_SECRET`, `SMTP_PASSWORD`, `AZURE_STORAGE_CONNECTION_STRING` if used,
+and especially the **hardcoded `SessionMiddleware` secret_key** currently sitting as a literal string in
+source — to Key Vault references resolved through the same Managed Identity, which requires zero code
+changes since `os.environ[...]` reads would resolve the injected value transparently either way.
+
+### Q17. Does this service run in Docker?
+
+Not in production — this is a real correction worth making plainly if it comes up, since it's a natural
+assumption for a FastAPI service. It runs on **Azure App Service's native Python runtime**
+(`uvicorn`/`gunicorn` running `app.py` directly), with no Dockerfile, no container registry, and no Web
+App for Containers involved. Containerizing it is a reasonable, low-risk proposal to make in an
+interview — environment consistency, a path to other compute targets — but it should be framed
+explicitly as a proposal, not a description of what's running today.
+
+### Q18. What's the one hardcoded secret in this codebase you'd fix first?
+
+`SessionMiddleware(secret_key="uploader-secret-key", ...)` in `app.py` — a literal string constant that
+signs the session cookie. Anyone with that value can forge a valid signed session cookie, including
+setting arbitrary session state. The fix is low-risk and mechanical: move it to an environment variable
+(sourced from Application Settings today, Key Vault as the proposed hardening step), generate an
+independent strong random value per environment, and nothing else in the app needs to change.
 
 ---
 
 ## "What Would You Change If You Rebuilt This Today?"
 
-### Q14. What would you change if you rebuilt this today?
+### Q19. What would you change if you rebuilt this today?
 
-A strong answer names 2–3 specific, defensible changes rather than either "nothing" (reads as
-incurious) or a vague "I'd use better technology" (reads as unprepared):
+Three specific, defensible changes, each already argued in depth elsewhere in this course:
 
-1. **Event Grid instead of a raw blob trigger** for the post-upload Function, once there's more than
-   one downstream consumer of "a document was uploaded" (e.g., both an indexing pipeline and a
-   notification service) — Event Grid lets multiple subscribers react to the same event independently,
-   where a single blob trigger function tends to accumulate unrelated responsibilities over time.
-2. **Structured, schema-validated status transitions** enforced at the database layer (a check
-   constraint or an explicit state-machine table) rather than trusting application code to only ever
-   set `status` to one of the expected values — cheap insurance against a future bug silently writing
-   an invalid status that breaks downstream polling logic.
-3. **Fine-grained, resource-scoped authorization** beyond flat App Roles — today's RBAC (chapter 06)
-   answers "can this caller write documents at all," but doesn't express something like "this uploader
-   may only manage documents in the `compliance/` category." Azure AD supports richer patterns for this
-   (application-managed permissions checked against Graph-resolved group membership, or a policy engine
-   like Open Policy Agent in front of the FastAPI dependency layer) that weren't necessary at this
-   service's original scope but would be worth revisiting if the category/permission matrix grew more
-   complex than a handful of App Roles could cleanly express.
+1. **Real document revision tracking** (chapter 05) — a `document_group_id`/`supersedes_document_id`
+   pair, plus the harder, cross-team half: getting `INGEST_API`/HEXA itself to understand versioning,
+   since this service alone can't fully solve it.
+2. **Move the background maintenance sweep out of the web process** — an Azure Functions Timer trigger
+   (or a distributed lock if staying in-process) to eliminate the per-instance-not-singleton caveat
+   before it causes a real, reported problem rather than after.
+3. **Close the two named hardening gaps together** — the hardcoded session secret and the plaintext
+   `MICROSOFT_PROVIDER_AUTHENTICATION_SECRET`/`SMTP_PASSWORD` values, via the Key Vault-reference
+   migration in chapter 07 — a small, low-risk, high-value change that's been identified but not done.
 
-The underlying point interviewers are listening for: comfort naming real tradeoffs and specific
-technical debt, not defensiveness about the original design. Every real system has things you'd do
-differently with hindsight — naming them credibly is a stronger signal than claiming there aren't any.
-
----
-
-## Client, Production, and Multi-Tenancy (HSBC / Bank of America)
-
-### Q15. This service ingested documents for two banking clients — how did you guarantee HSBC's documents could never be queried or exposed to a Bank of America session?
-
-Isolation had to hold at every layer the data touched, not just one:
-
-- **Identity, not client input, decides the tenant.** The authenticated caller's tenant (`hsbc` or
-  `bofa`) was resolved server-side from their Azure AD identity — never accepted as a client-supplied
-  header, query parameter, or body field. A client-supplied tenant ID is trivially spoofable; a
-  server-resolved one isn't.
-- **SQL: `tenant_id` on every table, enforced at one chokepoint.** Every table carries a `tenant_id`
-  column, it leads every composite index, and every query passes through a repository layer that
-  injects `WHERE tenant_id = @tenant_id` automatically rather than trusting each call site to remember
-  it — backed by SQL Server Row-Level Security policies as a second line of defense, so even a bug in
-  application code can't return cross-tenant rows.
-- **Blob storage: tenant-scoped paths/containers.** Blob paths were prefixed per tenant
-  (`hsbc/2026/07/15/<guid>.pdf`), so a storage-level access policy or SAS token scoped to one tenant's
-  prefix structurally cannot reach the other's files.
-- **Tested, not just designed.** A test suite explicitly asserted "a query scoped to tenant A never
-  returns a row belonging to tenant B," regardless of what filters or edge-case inputs were passed —
-  because this is exactly the kind of bug that's invisible in normal testing (both tenants' data looks
-  identical in shape) and catastrophic if it ships.
-
-The honest framing for an interviewer: a missing `tenant_id` filter here isn't an ordinary bug, it's a
-cross-tenant confidentiality breach between two named banking clients — contractually and regulatorily
-serious, not just an embarrassing ticket — which is why the isolation was enforced structurally
-(one chokepoint, defense in depth) rather than left to developer discipline at every call site. See
-chapter 05 for the schema-level detail.
-
-### Q16. How would you design this to handle a customer-facing document-upload SLA in production, not just work correctly in a demo?
-
-A demo only has to be *correct*; a production SLA has to be correct **and** predictable under real
-load, real failure modes, and real deploys. The concrete differences:
-
-- **Predictable latency, not just eventual correctness.** The accept-fast/process-async split
-  (chapter 01, 04) keeps the synchronous upload response fast regardless of downstream processing time
-  — but the async side needed its own latency guarantee too. That's why the post-upload Azure Function
-  ran on a **Premium plan instead of consumption**: consumption-plan cold starts after an idle period
-  are fine for a demo (nobody's timing it) but not for a client expectation that documents process
-  promptly, every time.
-- **Zero-downtime deploys.** Deployment slots (staging → smoke test → swap) meant releases were a
-  non-event instead of a scheduled outage window — a real SLA can't have a standing "the API is down
-  during Tuesday 2am deploys" carve-out.
-- **Scaling sized to real traffic shape, not average load.** Two banks' daily upload volume spikes
-  around business-day start/end rather than arriving smoothly; autoscale rules were tuned to that
-  pattern rather than to a flat average that would under-provision exactly when it mattered.
-- **Monitoring that catches degraded-but-not-down states.** Elevated latency, documents stuck in
-  `"processing"` past a threshold, and rising Function failure rates all had alerts (chapter 04/05,
-  Q13) — a customer-facing SLA is violated by "slow and stuck" long before it's violated by "fully
-  down," and a demo has no equivalent failure mode to catch.
-- **Defined rollback, not just forward-only deploys.** Every release had an instant-rollback path (slot
-  swap-back) — an SLA commitment implicitly promises "if a release goes wrong, we recover fast," not
-  just "we deploy carefully."
-
-The one-sentence version: a demo needs to work once, correctly; a production SLA needs to keep working,
-predictably, through deploys, load spikes, and partial failures — which is a different (and much
-larger) design problem than the CRUD logic itself.
-
-### Q17. What Azure networking decisions were non-negotiable for a bank client here, and why?
-
-Three, in order of how often a banking security review would ask about them:
-
-1. **No public network path to App Service, SQL, or Key Vault.** The App Service and Function app were
-   VNet-integrated, and Azure SQL and Key Vault were exposed only via **Private Endpoints** inside that
-   VNet — so there's no IP address on the public internet that reaches the database or the secrets
-   store directly, regardless of firewall rules or access keys. "Password-protected but publicly
-   reachable" is not an acceptable answer to a bank's cloud governance review; "not reachable at all
-   except through the private backbone" is.
-2. **A single, WAF-fronted public entry point.** Azure Front Door / Application Gateway with a Web
-   Application Firewall was the only public-facing surface, terminating TLS and filtering malicious
-   traffic (SQLi/XSS patterns, rate-limiting abusive clients) before anything reached the App Service.
-   One controlled ingress point is easier to monitor, patch, and reason about than "several services
-   each with their own public endpoint and their own security posture."
-3. **Identity-based access over network-based trust alone.** Azure AD authentication on the API and
-   managed identity for every service-to-service call (App Service/Function → Key Vault, App
-   Service/Function → SQL where supported) meant that even *within* the VNet, access wasn't "anything
-   inside the network is trusted" — each component's identity was checked, which matters because VNet
-   integration prevents external access but doesn't by itself prevent lateral movement between
-   components that shouldn't talk to each other.
-
-Why these were non-negotiable rather than "nice to have": a bank's regulators and internal security
-team evaluate the *network topology* independently of the application code — they will ask "show me
-that the database has no public endpoint" as a literal configuration check, not take "we use
-parameterized queries" as a substitute answer. Getting the networking decisions right was a prerequisite
-for the engagement being approved to go to production at all, not an optimization layered on afterward.
-
----
-
-## Authentication, RBAC, and MSAL (chapter 06)
-
-### Q18. Walk me through what happens, request by request, when an HSBC employee calls this API — from token to authorized response.
-
-Five stages, each independently checkable:
-
-1. **Token acquisition (client side, before the request even reaches this service).** The HSBC
-   employee's client application uses **MSAL** to authenticate against Azure AD — interactively via the
-   Authorization Code flow with PKCE for a human user, or via Client Credentials if the caller is
-   another backend system rather than a person. MSAL returns an access token, caching it so subsequent
-   calls reuse it (or a refreshed version) without re-prompting Azure AD every time.
-2. **The request arrives with `Authorization: Bearer <token>`.** FastAPI's `Depends(get_current_user)`
-   dependency runs before any route logic — it's the first thing that touches the request.
-3. **JWT validation.** The service fetches (and caches) Azure AD's JWKS signing keys and verifies the
-   token's signature, then checks `aud` (issued for *this* API, not some other one), `iss` (issued by
-   the expected tenant — HSBC's, specifically, given the multi-tenant context), and `exp` (not expired).
-   Any failure here is a `401` before anything else runs.
-4. **RBAC role check.** `Depends(require_role("DocumentUploader.Write"))` (or the appropriate role for
-   the endpoint) inspects the validated token's `roles` claim — populated by Azure AD from the App Role
-   assignment an admin granted this employee — and returns `403` if the required role isn't present.
-5. **Tenant-scoped data access.** Only after both checks pass does the route touch data, and even then
-   through the `DocumentRepository` (chapter 05), which resolves `tenant_id` from the *token*, not from
-   any client-supplied value, and applies it to every query structurally.
-
-The point worth making explicit: these are four independently testable layers (MSAL/token acquisition,
-JWT validation, RBAC, tenant scoping), not one blob of "auth logic" — a bug or a test gap in any one of
-them is contained to that layer, not a systemic hole across the whole request path.
-
-### Q19. What's the difference between authentication and authorization here, concretely?
-
-They answer three genuinely different questions, and this service keeps them as three separate,
-layered mechanisms rather than one blurred check — conflating them is a common mistake candidates make
-under interview pressure:
-
-- **Authentication — "who is this?"** Answered by Azure AD, MSAL, and OAuth 2.0. The service validates
-  a signed JWT and trusts the identity (`oid`, `email`) it asserts, because that assertion came from a
-  trusted issuer, not from anything the client claimed directly.
-- **Authorization (RBAC) — "what are they allowed to do?"** Answered by the token's `roles` claim,
-  populated from Azure AD App Role assignments, checked via `Depends(require_role(...))`. A caller can
-  be fully authenticated (a real, valid HSBC employee) and still be authorized to do nothing but read —
-  authentication succeeding says nothing about what operations are permitted.
-- **Tenant scoping — "whose data can they see?"** Answered by the `tenant_id` filter in the repository
-  layer (chapter 05), resolved from the token's tenant claim. This is deliberately *not* a role — an
-  HSBC employee with the `DocumentUploader.Write` role has that role regardless of tenant; it's the
-  separately-enforced `tenant_id` filter that keeps them from ever seeing Bank of America's rows, not
-  the role name.
-
-Chapter 06 calls this out explicitly as an interviewer trap: naming a role like `HSBC.Uploader` and
-treating the naming convention itself as the tenant-isolation mechanism is fragile — it depends on every
-future role and every future query respecting a naming convention rather than a structural,
-independently-enforced boundary. The correct framing is three layered, independently-enforced concerns:
-authentication (Azure AD/MSAL/OAuth), authorization (RBAC role claims), and data scoping (`tenant_id`
-enforcement) — not two.
-
-### Q20. How would you test the RBAC logic without hitting real Azure AD in CI?
-
-Never call real Azure AD from a unit or CI test — it's slow, requires network access and real
-credentials, and makes tests flaky for reasons that have nothing to do with the code under test. Two
-complementary techniques:
-
-- **Mock/stub JWTs signed with a test key.** Generate a JWT locally, signed with a throwaway RSA
-  key the test suite controls (not Azure AD's real signing key), containing whatever claims a test case
-  needs (`roles: ["DocumentUploader.Write"]`, a specific `tenant_id`). Point the JWKS-fetching code at a
-  local test JWKS endpoint (or monkeypatch the key lookup) so the *real* validation code path — signature
-  check, `aud`/`iss`/`exp` checks — still runs against a token the test fully controls. This tests the
-  validation logic itself, not just the role-check logic downstream of it.
-- **FastAPI dependency overrides for pure unit tests of route logic.** FastAPI's `app.dependency_overrides`
-  lets a test replace `get_current_user` with a function that returns a fixed `AuthenticatedUser` object
-  directly — no token, no signature validation, no JWKS call at all — when the test's actual concern is
-  "does this endpoint behave correctly for a user with role X," not "does JWT validation work." Using
-  both: a small number of tests exercise the real token-validation path end-to-end with a locally-signed
-  test token; the bulk of route-level tests use dependency overrides for a fast, focused check of
-  `require_role`'s pass/fail behavior — a `200` when the required role is present, a `403` when it's not.
-  `notebooks/01_fastapi_crud_api_demo.ipynb` demonstrates this pattern directly, with a mock role-check
-  dependency exercised via `TestClient` for both outcomes.
+The underlying point: naming real, specific technical debt with a concrete fix already in mind is a
+stronger signal than either "nothing, it was perfect" or a vague "I'd use better technology."
