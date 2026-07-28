@@ -113,7 +113,7 @@ Beyond Azure OpenAI's built-in content filter, a chatbot for a regulated client 
 - **PII handling** — depending on the use case, redacting or avoiding echoing sensitive personal data
   back into logs (Application Insights) or into the LLM prompt unnecessarily.
 - **Audit logging** — every question/answer pair logged with a timestamp, user ID, and (if RAG) the
-  source documents used, both for compliance and for later evaluation (see Course 02,
+  source documents used, both for compliance and for later evaluation (see Course 04,
   Model Risk Monitoring, for the evaluation/monitoring layer that would typically sit on top of this
   chatbot in a mature deployment).
 
@@ -142,7 +142,7 @@ customer/employee traffic, not just a pilot, so this isn't hypothetical. Five th
   the surface). Authentication only answers "who is this?" — **RBAC** (role-based access control) on
   top of the validated token's claims is what answers "what are they allowed to do?" (e.g., a
   `ChatUser` role vs. a `ChatAdmin` role with access to conversation-review tooling). There's no
-  anonymous path into a system that talks to Azure OpenAI on the bank's behalf. See Course 03's
+  anonymous path into a system that talks to Azure OpenAI on the bank's behalf. See Course 05's
   dedicated chapter for the full OAuth/MSAL/RBAC implementation pattern shared across these backend
   services.
 - **Deployment slots for zero-downtime releases.** Azure App Service supports multiple **deployment
@@ -150,7 +150,7 @@ customer/employee traffic, not just a pilot, so this isn't hypothetical. Five th
   and warms up in the staging slot — including running smoke tests against it — and only then is
   **slot-swapped** into production, which is close to instantaneous and avoids the downtime window of
   a straight in-place redeploy. If something's wrong post-swap, swapping back is just as fast. This is
-  the deployment mechanic that the Azure DevOps pipeline in Course 04 targets; Course 04 covers the
+  the deployment mechanic that the Azure DevOps pipeline in Course 06 targets; Course 06 covers the
   pipeline stages in depth, this chapter is just the "why slots" piece of that story.
 - **Application Insights tracing per conversation, for audit/compliance.** Beyond generic uptime
   monitoring, every conversation gets end-to-end **Application Insights** tracing: request ID,
@@ -173,5 +173,5 @@ retrieval layer via Azure AI Search for grounding, streaming responses back to t
 filtering plus audit logging as the safety net appropriate for a financial-services/energy client. In
 production for a bank, add the edge/identity/network layer above: Front Door/App Gateway (WAF) ->
 Azure AD -> App Service in a VNet with Private Endpoints -> Azure OpenAI, with Application Insights
-tracing every conversation. Azure DevOps (Course 04 goes deeper on this) is what ships changes to any
+tracing every conversation. Azure DevOps (Course 06 goes deeper on this) is what ships changes to any
 layer of this stack safely, via deployment slots for zero-downtime releases.

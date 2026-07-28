@@ -40,12 +40,12 @@ for the full statement. Concretely, production deployment meant:
 - **Azure AD** for authentication/authorization — tokens acquired via **MSAL** (Microsoft
   Authentication Library) using standard **OAuth 2.0 / OIDC** flows, with **RBAC** (role-based access
   control, via Azure AD app roles) enforced on the backend to decide what an authenticated identity is
-  actually allowed to do, replacing any notion of open/anonymous access. (Course 03's dedicated
+  actually allowed to do, replacing any notion of open/anonymous access. (Course 05's dedicated
   RBAC/MSAL/OAuth chapter covers this pattern in depth — the document-uploader service uses the same
   auth backbone.)
 - **Azure Monitor / Application Insights** for observability and audit-grade tracing.
 - **Azure OpenAI** as the LLM backend (as covered below), and the **Azure DevOps CI/CD pipeline**
-  (Course 04) as the only path changes take into production.
+  (Course 06) as the only path changes take into production.
 
 The non-functional bar this had to clear wasn't "does it work in a demo" — it was handling real daily
 customer/employee query volume **without hindrance**: reliably, at acceptable latency, under
@@ -70,18 +70,20 @@ scratch for a chatbot engagement). That means:
   pipelines, artifact promotion across dev/test/prod, and release gates typical of a regulated
   client engagement.
 - **LangChain / LCEL** (per the broader skills list) for composing the prompt → LLM → parser
-  pipeline, likely with **Chainlit or Streamlit** for a fast internal-facing UI, since consultancies
-  favor rapid prototyping tools for pilot/POC phases before a client commits to a full custom
-  frontend.
+  pipeline, exposed to users through **`react-service`** — a dedicated React single-page-app frontend,
+  deployed as its own microservice, calling the FastAPI backend's Chat API over a streamed connection.
+  (Chainlit/Streamlit remain genuine skills too — see Chapter 04 — but they're the tools reached for
+  during rapid internal-tool/POC prototyping, not what shipped as this chatbot's production UI.)
 
-> The client (HSBC), the production/customer-facing nature of the deployment, and the Azure production
+> The client (HSBC), the production/customer-facing nature of the deployment, the Azure production
 > topology (App Service, Front Door/App Gateway, VNet/Private Endpoints, Azure AD, Azure Monitor,
-> Azure OpenAI, Azure DevOps) are confirmed facts — see "Client & Production Deployment" above. Thewb
-> finer-grained implementation detail below it (exact framework choices like LangChain/LCEL,
-> Streamlit/Chainlit, Azure AI Search) is still a **typical/recommended architecture** for this class
-> of project, not a verified line-by-line description of Capco's internal implementation. Treat that
-> part as the story you tell in an interview, backed by the concepts in this course, not as a claim
-> about proprietary code.
+> Azure OpenAI, Azure DevOps), and the **`react-service` frontend microservice as the production UI**
+> are confirmed facts — see "Client & Production Deployment" above and Chapter 04. The finer-grained
+> implementation detail below it (exact framework choices like LangChain/LCEL, the specific
+> `react-service`/backend API contract, Azure AI Search) is still a **typical/recommended architecture**
+> for this class of project, not a verified line-by-line description of Capco's internal implementation.
+> Treat that part as the story you tell in an interview, backed by the concepts in this course, not as a
+> claim about proprietary code.
 
 ## Architecture Diagram
 
@@ -93,13 +95,16 @@ flowchart LR
 
     subgraph Edge["Edge (Public-Internet-Facing)"]
         FD[Azure Front Door / App Gateway<br/>WAF + TLS termination]
-        AAD[Azure AD<br/>Auth / AuthZ]
+        AAD[Azure AD<br/>Auth / AuthZ - MSAL.js in browser]
+    end
+
+    subgraph FE["react-service (own App Service, own release cadence)"]
+        UI2[React SPA<br/>Chat UI - MSAL.js auth]
     end
 
     subgraph VNet["Azure VNet (Private Network Boundary)"]
-        subgraph AppSvc["Azure App Service (slots: staging -> prod)"]
-            UI2[Streamlit / Chainlit UI]
-            API[Chat API]
+        subgraph AppSvc["Azure App Service - Backend (slots: staging -> prod)"]
+            API[Chat API - streaming SSE/WebSocket]
             MEM[Conversation Memory / Session Store]
             CHAIN[LangChain / LCEL Pipeline]
         end
@@ -122,7 +127,8 @@ flowchart LR
 
     U --> FD
     FD --> AAD
-    AAD --> UI2 --> API
+    AAD --> UI2
+    UI2 -- HTTPS/SSE, Bearer token --> API
     API --> MEM
     API --> CHAIN
     CHAIN -. Private Endpoint .-> AOAI
@@ -130,6 +136,7 @@ flowchart LR
     API -. Private Endpoint .-> KV
     API --> AI
     REPO --> PIPE --> AppSvc
+    REPO --> PIPE --> FE
 ```
 
 Plain-text version, if diagram rendering isn't available:
@@ -137,18 +144,24 @@ Plain-text version, if diagram rendering isn't available:
 ```
 HSBC User (customer-facing, production)
   -> Azure Front Door / Application Gateway (WAF, TLS termination)
-  -> Azure AD (auth/authz)
-  -> Azure App Service, in a VNet, deployment slots for zero-downtime releases
-       |-- Streamlit/Chainlit UI -> Python Chat API
-       |-- Conversation Memory / Session Store
+  -> Azure AD (auth/authz, MSAL.js acquiring a token in the browser)
+  -> react-service (its own Azure App Service, own release cadence, separate from the backend)
+       |-- React SPA Chat UI, authenticated via MSAL.js against the same Azure AD app
+       |   registration family as the backend (Chapter 03/Course 05's RBAC/MSAL content)
+       |-- calls the backend Chat API over HTTPS, streaming via SSE/WebSocket, with the
+       |   MSAL-acquired token attached as an Authorization: Bearer header on every call
+       |-- separate origin from the backend -> backend CORS explicitly allow-lists react-service
+  -> Azure App Service - Backend, in a VNet, deployment slots for zero-downtime releases
+       |-- Chat API (streaming) --> Conversation Memory / Session Store
        |-- LangChain/LCEL pipeline --> (Private Endpoint) --> Azure OpenAI
        |                          --> (Private Endpoint) --> Azure AI Search (RAG)
        |-- (Private Endpoint) --> Key Vault (secrets)
        |-- Azure Monitor / Application Insights (monitoring, per-conversation tracing)
 No backend service above is reachable directly from the public internet — everything behind the
 Front Door/App Gateway sits inside the VNet and talks to Azure OpenAI/Search/Key Vault only via
-Private Endpoints.
-Azure DevOps (repo + YAML pipeline) --> builds/deploys the backend (Course 04)
+Private Endpoints. react-service and the backend are two independently deployable services sitting
+behind the same Front Door/WAF edge layer (Chapter 04).
+Azure DevOps (repo + YAML pipeline) --> builds/deploys both react-service and the backend (Course 06)
 ```
 
 ## STAR Summary (practice this out loud, under 90 seconds)
@@ -173,9 +186,13 @@ networking, WAF at the edge), and integrated into their existing Azure DevOps re
 LangChain/LCEL to compose the prompt-construction, retrieval, and response-parsing pipeline. I
 implemented conversation state management so the bot could handle multi-turn follow-up questions,
 added prompt engineering (system prompts, few-shot examples, structured output formatting) to keep
-answers on-topic and reduce hallucination, and stood up a Streamlit/Chainlit front end for rapid
-internal testing. I set up the Azure DevOps CI/CD pipeline so every change was automatically built,
-tested, and promoted through dev/test/prod with proper secret management via Key Vault.
+answers on-topic and reduce hallucination, and built guardrails to handle vague or out-of-scope
+questions gracefully instead of letting the model free-generate. The production interface was
+`react-service`, a dedicated React frontend microservice calling the backend's streaming Chat API and
+authenticating through the same Azure AD/MSAL setup as the backend (Chainlit/Streamlit were the tools
+I used for faster internal prototyping along the way, not the production UI). I set up the Azure
+DevOps CI/CD pipeline so every change was automatically built, tested, and promoted through
+dev/test/prod with proper secret management via Key Vault.
 
 **Result.** *(Illustrative)* The production rollout reduced average query resolution time by roughly
 35%, and usage data suggested the assistant could deflect around 40% of routine "where do I find X"
@@ -189,10 +206,13 @@ time for new prompt/model changes from days to under an hour.
 | `01-llm-fundamentals-and-prompt-engineering.md`     | What an LLM actually does, prompt engineering patterns, failure modes                         |
 | `02-langchain-and-lcel.md`                          | LangChain core abstractions and the LCEL pipe-composition model                               |
 | `03-chatbot-architecture-azure-openai.md`           | Production chatbot architecture on Azure — deployments, RAG, latency/cost, content filtering |
-| `04-building-uis-chainlit-streamlit.md`             | Rapid UI prototyping with Streamlit and Chainlit                                              |
+| `04-frontend-architecture-react-service-and-rapid-prototyping.md` | The real production UI: `react-service` (a separate React frontend microservice), its streaming API contract with the backend, MSAL.js browser auth, and CORS — plus Chainlit/Streamlit correctly scoped as rapid-prototyping tools, not the production UI |
 | `05-agents-and-tools-langchain-agent-case-study.md` | LangChain agents/ReAct, worked case study: Text-to-Math solver on Groq/Gemma2-9b              |
+| `06-knowledge-freshness-and-conversation-state-lifecycle.md` | The "your source documents changed — how does the bot stop answering from the old version" question: today's gap, a manual fix, conversation-turn-count vs. knowledge-freshness, a proposed event-driven design |
+| `07-production-resilience-and-operational-engineering.md` | Real error-handling behavior, a per-instance-cache scaling caveat, four GenAI-specific bugs and what would've caught each, concrete Azure OpenAI timeout/retry values, one named hardening gap |
+| `08-guardrails-scope-and-vague-query-handling.md`   | The "what if the user asks vague, out-of-scope questions — what kind of guardrails?" question: distinguishing vague-in-scope/out-of-scope/adversarial, a layered guardrail architecture, a routing decision table, and honest threshold-tuning caveats |
 | `99-Interview-QA.md`                                | Behavioral, technical, and system-design interview Q&A                                        |
-| `notebooks/`                                        | Four runnable Jupyter notebooks, one per major concept, offline-friendly                      |
+| `notebooks/`                                        | Seven runnable Jupyter notebooks, one per major concept, offline-friendly                     |
 
 Read in order — each chapter builds on the last, and the notebooks are meant to be run alongside the
 chapter with the matching number.

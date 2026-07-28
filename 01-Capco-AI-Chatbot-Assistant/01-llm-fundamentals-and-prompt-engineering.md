@@ -79,9 +79,72 @@ prompt is your entire lever.
 Asking the model to "think step by step" before giving a final answer measurably improves accuracy
 on multi-step reasoning tasks, because it lets the model spend more forward passes (more tokens) on
 intermediate reasoning before committing to an answer — remember, the model can only "think" by
-emitting tokens; it has no hidden scratchpad. This is directly relevant to the Text-to-Math agent
-(Chapter 5), where the model needs to reason through a word problem before invoking a calculator
-tool.
+emitting tokens; it has no hidden scratchpad. Every reasoning token the model emits becomes part of
+the context the *final answer* token is conditioned on — so if the intermediate reasoning is correct,
+the final answer is being derived from it, not pattern-matched directly from the question. Skip the
+reasoning step and the model has to get a multi-step answer right "in one shot," with no chance to
+catch its own intermediate mistake before committing to a conclusion.
+
+**Example — zero-shot (no CoT) vs. CoT, on a policy-eligibility question** (the kind of multi-condition
+check a financial-services chatbot answers constantly):
+
+```
+Zero-shot prompt:
+"A customer has been with the bank 18 months, has an average balance of $3,200, and
+missed one payment 8 months ago. Are they eligible for the Premium tier under our
+current policy (requires: 12+ months tenure, $2,500+ average balance, no missed
+payments in the last 6 months)?"
+
+→ Model answer (no reasoning shown): "No, not eligible." — plausible, but did it actually
+  check all three conditions, or pattern-match on "missed a payment" and stop there?
+  You can't tell, and neither can a compliance reviewer.
+```
+
+```
+CoT prompt (same question + "Think through each policy condition step by step before
+answering."):
+
+→ Model output:
+  "1. Tenure: 18 months >= 12 months required. ✓ Met.
+   2. Average balance: $3,200 >= $2,500 required. ✓ Met.
+   3. Missed payments in last 6 months: the missed payment was 8 months ago, which is
+      outside the 6-month lookback window. ✓ Met.
+   All three conditions are satisfied. Eligible for Premium tier."
+```
+
+The CoT version is not just more convincing — it's auditable. A reviewer (or the Chapter 2 model-risk
+monitoring pipeline) can check *which* condition the model evaluated wrong if the final answer turns
+out to be incorrect, instead of only seeing a bare "yes/no" with no way to diagnose the failure.
+
+**Example — the Text-to-Math agent (Chapter 5).** Given "If a train travels 60 miles in 45 minutes,
+how far does it travel in 2 hours?", CoT reasoning looks like: "45 minutes = 0.75 hours, so speed =
+60 / 0.75 = 80 mph. In 2 hours: 80 × 2 = 160 miles." — each step is a token sequence the next step's
+tokens are conditioned on, and it's exactly this reasoning trace that the agent's ReAct loop (Chapter
+5) parses to decide *when* to hand a sub-calculation off to the calculator tool rather than trying to
+do arithmetic purely in next-token prediction, which is where unaided LLMs are least reliable.
+
+**Variants worth naming in an interview:**
+
+- **Zero-shot CoT**: just append a trigger phrase like "Let's think step by step" to an otherwise
+  ordinary prompt — no worked examples needed, cheapest to implement.
+- **Few-shot CoT**: combine with the few-shot pattern above — the 1–5 examples in the prompt include
+  the reasoning trace, not just the final answer, teaching the model the *shape* of reasoning you want
+  (useful when zero-shot CoT reasoning wanders in a direction that doesn't match how the client's
+  domain actually reasons about eligibility, risk, or compliance questions).
+- **Self-consistency**: sample the same CoT prompt multiple times at temperature > 0, take the
+  majority-vote final answer across the independent reasoning paths — trades latency/cost for
+  materially higher accuracy on harder multi-step questions, worth mentioning as the "if accuracy
+  matters more than speed" escalation.
+
+**Production nuance — CoT reasoning and structured output don't naturally mix.** A user-facing chatbot
+generally shouldn't show its raw reasoning trace: it's verbose, may reference source-document
+excerpts in a way that's not appropriate to surface directly, and doesn't fit the JSON schema from the
+Structured Output Prompting section above. The common production pattern is a **two-step call**: first
+a CoT-prompted call with free-text reasoning (not shown to the user), then either a second
+structured-output call that asks the model to extract just the final answer into the schema, or a
+single call where the schema itself has a private `reasoning` field the frontend (`react-service`,
+Chapter 4) simply never renders. Either way, the reasoning still happened — and still improved
+accuracy — it's just not part of what reaches the user or gets logged as the "answer."
 
 ### System vs User Prompts
 
@@ -106,13 +169,88 @@ alongside the answer text.
 
 ## Common Failure Modes (and how they show up in a chatbot)
 
-| Failure mode | What it looks like | Mitigation |
-|---|---|---|
-| **Hallucination** | Confident, plausible, wrong answer — especially when the true answer isn't in context | Ground answers in retrieved context (RAG), instruct the model to say "I don't know" explicitly, lower temperature |
-| **Prompt injection** | User input contains text trying to override the system prompt ("ignore previous instructions...") | Treat retrieved/user content as data, not instructions; input sanitization; instruction hierarchy |
-| **Context window overflow** | Long conversations silently lose early context, or the call errors out | Summarize/truncate history (Chapter 3), track token counts before calling the API |
-| **Format drift** | Model stops following the requested output schema over a long conversation | Re-assert format instructions periodically, use structured-output/function-calling modes |
-| **Stale or out-of-scope knowledge** | Model answers from pretraining knowledge instead of the client's actual current policy | RAG grounding + explicit system-prompt scoping |
+| Failure mode                              | What it looks like                                                                                | Mitigation                                                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Hallucination**                   | Confident, plausible, wrong answer — especially when the true answer isn't in context            | Ground answers in retrieved context (RAG), instruct the model to say "I don't know" explicitly, lower temperature |
+| **Prompt injection**                | User input contains text trying to override the system prompt ("ignore previous instructions...") | Treat retrieved/user content as data, not instructions; input sanitization; instruction hierarchy                 |
+| **Context window overflow**         | Long conversations silently lose early context, or the call errors out                            | Summarize/truncate history (Chapter 3), track token counts before calling the API                                 |
+| **Format drift**                    | Model stops following the requested output schema over a long conversation                        | Re-assert format instructions periodically, use structured-output/function-calling modes                          |
+| **Stale or out-of-scope knowledge** | Model answers from pretraining knowledge instead of the client's actual current policy            | RAG grounding + explicit system-prompt scoping                                                                    |
+
+### Format Drift, In Depth
+
+The table row above is the one-line summary; this is the version to actually explain if an
+interviewer follows up with "what does that mitigation look like in practice?"
+
+**Why it happens.** A chatbot is often instructed once, in the system prompt, to always respond in a
+fixed schema — say `{"answer": ..., "citations": [...], "confidence": ...}` so `react-service` (Chapter
+4) can render a citation list and a confidence badge instead of raw prose. That single instruction
+reliably holds for the first several turns, then degrades — a field goes missing, the model lapses
+into prose, or the JSON is malformed. Three things compound to cause this:
+
+- **Instruction dilution.** The format instruction lives once, at turn 1. As the conversation grows
+  (even with the truncation strategy from Chapter 6), that instruction becomes a shrinking fraction of
+  total context — its relative weight in the model's attention drops as unrelated conversational
+  content accumulates around it.
+- **Probabilistic compliance, not guaranteed compliance.** At any temperature above 0, format-following
+  is a per-token probability, not a hard constraint. The chance of a deviation in any single response is
+  low; over 30 turns, the *cumulative* chance that at least one response deviates approaches certainty —
+  a compounding-probability problem, not a one-off glitch.
+- **Conversational tone creep.** As a long exchange gets more casual, the model tends to drift toward
+  matching that tone, which pulls against a rigid JSON schema unless something actively counteracts it.
+
+**Mitigation 1 — re-assert format instructions periodically.** Instead of relying on the system prompt
+issued once at conversation start, re-inject a short format reminder into (or near) *every* call, not
+just the first — an LCEL prompt template (Chapter 2) that appends `"Respond only as JSON matching {schema}"` right before the final user turn on every invocation, rather than baking it once into
+history:
+
+```python
+from langchain_core.prompts import ChatPromptTemplate
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are an internal assistant for {client_name}. "
+               "Only answer using the provided context."),
+    ("placeholder", "{history}"),
+    ("human", "{question}\n\n"
+              "Respond only as JSON matching this schema: "
+              '{{"answer": str, "citations": list[str], "confidence": float}}'),
+])
+```
+
+This works better than a start-of-conversation-only instruction because of **recency**: instructions
+nearer the end of context are followed more reliably than ones several thousand tokens back. The cost
+is a handful of extra tokens per call; the reliability win for downstream JSON parsing is large.
+
+**Mitigation 2 — structured-output / function-calling modes.** This is the stronger fix, because it
+moves enforcement from *prompting* (the model is asked nicely and can still statistically deviate) to
+*decoding* (the API constrains which tokens are even generatable in the first place):
+
+```python
+from pydantic import BaseModel
+
+class ChatAnswer(BaseModel):
+    answer: str
+    citations: list[str]
+    confidence: float
+
+structured_llm = llm.with_structured_output(ChatAnswer)  # LangChain, LCEL-compatible (Chapter 2)
+result: ChatAnswer = structured_llm.invoke(prompt_value)
+```
+
+Under the hood this maps to Azure OpenAI's native **function calling** (the model "calls" a
+`return_answer(answer, citations, confidence)` tool instead of writing free text, and the API returns
+structured arguments) or **JSON mode / structured outputs**
+(`response_format={"type": "json_schema", ...}`), which constrains generation via grammar-based
+decoding so the output is *guaranteed* to match the schema — not "the model tried to produce valid
+JSON," but invalid tokens for that schema literally can't be sampled.
+
+**The nuance worth stating explicitly in an interview**: schema compliance is not the same as semantic
+correctness. Structured-output mode guarantees the *shape* — fields present, correct types — but says
+nothing about whether the *content* in those fields is right; a `confidence: 0.95` field can still be
+confidently wrong. The strongest answer combines both mitigations: structured-output mode as the
+primary, API-enforced defense against format drift specifically, plus periodic re-assertion of the
+content-level instructions (e.g., "citations must be null if nothing in context supports the answer")
+that schema enforcement alone can't cover.
 
 ## Tying It Back
 
