@@ -1,8 +1,8 @@
 # Skills Coverage Matrix
 
-Every item from the resume's "Strengths and Expertise" section, mapped to the course(s) that teach it.
-Use this as a checklist — if an interviewer asks about any resume bullet, you'll know exactly which
-folder to review.
+Every item from the resume's "Strengths and Expertise" section is mapped below to the course(s) that
+teach it. Use this as a checklist: if an interviewer asks about any resume bullet, you'll know exactly
+which folder to review.
 
 ## Generative AI
 
@@ -101,9 +101,9 @@ folder to review.
 
 ## Production Cloud Operations (client-facing deployments)
 
-All 11 numbered project courses went to production with a customer/loan-officer-facing interface — see
-the "Client & Production Context" section in the root `README.md` for the HSBC/Bank of America (Capco)
-and Eli Lilly/AstraZeneca (Indegene) client mapping.
+All 11 numbered project courses went to production with a customer/loan-officer-facing interface. See
+the "Client & Production Context" section in the root `README.md` for how HSBC/Bank of America (Capco)
+and Eli Lilly/AstraZeneca (Indegene) map to each client.
 
 | Skill | Primary Course(s) |
 |---|---|

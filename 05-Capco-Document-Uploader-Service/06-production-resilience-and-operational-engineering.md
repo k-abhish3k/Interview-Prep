@@ -1,9 +1,9 @@
 # 06 — Production Resilience and Operational Engineering
 
-This chapter is the "not limited to architecture specs, cover production grade" chapter — the real
-error-handling behavior, the two genuine scaling caveats this service ships with today, the actual bugs
-found and fixed during development, and the concrete operational settings (timeouts, pooling, a
-hardcoded secret) worth being able to discuss candidly rather than glossing over.
+This chapter goes beyond architecture diagrams into production-grade detail: the real error-handling
+behavior, the two genuine scaling caveats this service ships with today, the actual bugs found and
+fixed during development, and the concrete operational settings — timeouts, pooling, a hardcoded
+secret — worth being able to discuss candidly rather than glossing over.
 
 ## The real error-handling table
 
@@ -30,20 +30,20 @@ an idealized version of it:
 
 Two patterns worth naming explicitly if asked "how does this service handle failure":
 
-- **Non-IWPB failures are largely swallowed into response bodies, not HTTP status codes** — a batch
+- **Non-IWPB failures are largely swallowed into response bodies, not HTTP status codes.** A batch
   init failure comes back as `200` with an error message in the JSON. That's a real, honest weak point
-  (a monitoring system alerting purely on HTTP status codes would miss it) worth naming if asked "what
-  would you change" rather than defending it as intentional.
-- **IWPB failures are far more conservative** — `502`/`409`/`403` with the underlying row left in a
+  (a monitoring system alerting purely on HTTP status codes would miss it) — worth naming if asked
+  "what would you change," rather than defending it as intentional.
+- **IWPB failures are far more conservative** — `502`/`409`/`403`, with the underlying row left in a
   safe, retryable state (`PENDING_APPROVAL`, never partially `APPROVED`). This asymmetry reflects that
   IWPB is the newer, more carefully engineered path; the generic departments' error handling predates
-  this feature and was left untouched per REQUIREMENTS.md's "preserve the existing flow" constraint.
+  this feature and was left untouched, per `REQUIREMENTS.md`'s "preserve the existing flow" constraint.
 
 ## The background loop: real, and not a singleton
 
 `_iwpb_maintenance_loop` is started once per process from FastAPI's `lifespan()` and runs forever
-(hourly by default, `IWPB_MAINTENANCE_INTERVAL_SECONDS`), each of its two responsibilities wrapped in
-its own `try`/`except` so a failure in one never blocks the other:
+(hourly by default, `IWPB_MAINTENANCE_INTERVAL_SECONDS`). Each of its two responsibilities is wrapped
+in its own `try`/`except`, so a failure in one never blocks the other:
 
 ```python
 async def _iwpb_maintenance_loop():
@@ -62,23 +62,32 @@ async def _iwpb_maintenance_loop():
 **independent** `try`/`except` blocks — so an SMTP outage during the reminder step never prevents that
 same cycle's expiry-purge step from running.
 
-**The real operational caveat, worth stating candidly:** this loop is **per-process, not a singleton**.
+**The real operational caveat, worth stating candidly:** this loop is **per-process, not a singleton.**
 If the App Service Plan scales out to multiple instances, **every instance runs its own independent
-sweep** against the same shared Azure SQL database. Concretely:
+sweep** against the same shared Azure SQL database.
 
-- Worst case is a **duplicate reminder email** in the same window (two instances both decide, within
-  the same hour, that a document needs its daily reminder) — annoying, not dangerous.
+```mermaid
+flowchart TB
+    I1["Instance A\nruns its own sweep"] --> DB[(Shared Azure SQL DB)]
+    I2["Instance B\nruns its own sweep"] --> DB
+    I3["Instance C\nruns its own sweep"] --> DB
+```
+
+Concretely:
+
+- Worst case is a **duplicate reminder email** in the same window — two instances both decide, within
+  the same hour, that a document needs its daily reminder. Annoying, not dangerous.
 - It is **never data corruption**, because every write in the sweep is a simple, idempotent SQL
-  `UPDATE` (`status = 'AUTO_REMOVED'`, `reminder_count += 1`, `status = 'PURGED'`) — two instances
-  racing to set the same row to `AUTO_REMOVED` both succeed harmlessly; the row ends up in the same
-  final state either way.
+  `UPDATE` (`status = 'AUTO_REMOVED'`, `reminder_count += 1`, `status = 'PURGED'`). Two instances racing
+  to set the same row to `AUTO_REMOVED` both succeed harmlessly — the row ends up in the same final
+  state either way.
 
 **How you'd harden this if duplicate reminder emails became a real, reported problem:** two realistic
-options, worth naming as a pair rather than picking one dogmatically —
+options, worth naming as a pair rather than picking one dogmatically:
 
 1. **Move the sweep out of the web process entirely, into an Azure Functions Timer trigger.** A
-   Timer-triggered Function on a schedule (rather than "every App Service instance runs its own copy")
-   is a natural fit — Azure Functions' runtime already provides single-execution guarantees for timer
+   Timer-triggered Function on a schedule — rather than "every App Service instance runs its own copy"
+   — is a natural fit. Azure Functions' runtime already provides single-execution guarantees for timer
    triggers within a Function App, so the "N instances, N independent sweeps" problem disappears by
    construction, and it decouples the sweep's lifecycle from the web tier's scaling entirely.
 2. **Keep it in-process, but add a distributed lock or leader-election check** at the top of
@@ -102,7 +111,7 @@ token for calls to `INGEST_API`. Two real, documented limitations:
   (Blob Storage and Azure SQL are both reachable identically from every instance). If a load balancer
   routes two requests from the same browser session to two different App Service instances, only the
   instance that handled the original sign-in has that session's token cached — the other instance sees
-  a cache miss and forces a fresh login, even though the user just signed in seconds ago on the other
+  a cache miss, and forces a fresh login, even though the user just signed in seconds ago on the other
   instance.
 
 **Fixes, if this became a real problem under horizontal scaling:**
@@ -110,19 +119,19 @@ token for calls to `INGEST_API`. Two real, documented limitations:
 - **A shared cache (e.g., Redis / Azure Cache for Redis)** — the direct fix, replacing the in-process
   dict with a network-accessible one every instance can read/write, at the cost of adding a new managed
   dependency and a network hop on every token lookup.
-  - **Accept re-auth per instance** — if scale-out is rare or sticky sessions can be configured at the
+- **Accept re-auth per instance** — if scale-out is rare, or sticky sessions can be configured at the
   load balancer (routing a given session consistently to the same instance), the simpler fix is
   architectural rather than code: keep the in-process cache, but guarantee session affinity so a given
   user's requests always land on the instance that already has their token cached.
 
 This is a good "what would you change for 10x scale" answer because it names the actual mechanism (a
 plain dict, not an abstracted "cache layer" that already supports swapping backends) and a concrete,
-proportionate fix rather than a generic "add caching" answer.
+proportionate fix, rather than a generic "add caching" answer.
 
 ## Four real bugs found and fixed
 
 From `REQUIREMENTS.md`'s "Implementation Notes" section — genuine, source-confirmed bugs, good material
-for "tell me about a bug you found" questions:
+for "tell me about a bug you found" questions.
 
 **1. A top-level `import paridas as pd` typo.** A module-level import of a misspelled, non-existent
 package (`paridas` instead of `pandas`, used by `/fetch-approver-details`) would crash the **entire
@@ -130,37 +139,38 @@ application's startup** on any redeploy where that package isn't somehow already
 one endpoint that uses `pandas`, because a failed top-level import prevents the module from loading at
 all. *What would have caught this earlier:* basic static analysis / linting (`ruff`, `flake8`, or even
 just `python -c "import app"` as a CI smoke-test step) would flag an unresolvable import before it ever
-reaches a deploy; type-checking tooling (`mypy`) run in CI would also fail on an unresolvable module
+reaches a deploy. Type-checking tooling (`mypy`) run in CI would also fail on an unresolvable module
 reference.
 
 **2. `search_ingested_documents()` referencing an undefined variable `h`.** The function called
 `requests.get(url=h + "ingest/HEXA", ...)` — `h` was never defined anywhere; the intended variable was
 `INGEST_API`. This raised a `NameError` on **every single call**, silently breaking both the "Waiting
 to be ingested" and "Ingested Documents" tables for **every non-IWPB department** — exactly the "usual
-flow" that REQUIREMENTS.md's logical-separation requirement explicitly says must not be disturbed.
-*What would have caught this earlier:* an integration test hitting `/search-ingested-documents/{use_case}`
-against a mocked `INGEST_API` (even a trivial one asserting the endpoint returns `200` and a list) would
-have failed immediately — this is exactly the class of bug unit tests miss (nothing about the function's
-logic is wrong in isolation) but a real HTTP-level integration test catches on the first run.
+flow" that `REQUIREMENTS.md`'s logical-separation requirement explicitly says must not be disturbed.
+*What would have caught this earlier:* an integration test hitting
+`/search-ingested-documents/{use_case}` against a mocked `INGEST_API` (even a trivial one asserting the
+endpoint returns `200` and a list) would have failed immediately. This is exactly the class of bug unit
+tests miss — nothing about the function's logic is wrong in isolation — but a real HTTP-level
+integration test catches on the first run.
 
 **3. Blank Title column in every IWPB notification email.** `email_utils._document_rows_html()` looked
 up `doc.get('title', '')`, but every caller passes dicts built by `iwpb_workflow._row_to_dict()`, which
 uses the key `document_title`. Every new-upload, reminder, and auto-removal email therefore rendered a
-blank Title — the single most important field for an approver deciding what to review. *What would have
-caught this earlier:* a template-rendering test using a realistic fixture dict (the actual shape
-`_row_to_dict()` produces, not a hand-typed stand-in with convenient key names) — asserting the rendered
+blank Title — the single most important field for an approver deciding what to review. *What would
+have caught this earlier:* a template-rendering test using a realistic fixture dict (the actual shape
+`_row_to_dict()` produces, not a hand-typed stand-in with convenient key names), asserting the rendered
 HTML actually contains the document's title, not just that rendering doesn't throw.
 
 **4. Reminder count always showing "1/3."** `_row_to_dict()` never included a `reminder_count` key, so
 `_send_reminder_notification()`'s `d.get("reminder_count") or 1` always fell back to `1`, meaning every
-reminder email showed "Reminder (1/3)" regardless of whether it was actually the first, second, or third
-reminder. *What would have caught this earlier:* the same class of fix as bug 3 — a test asserting the
-reminder email's rendered day-number matches the row's actual `reminder_count`, using a fixture where
-`reminder_count` is deliberately set to `2` or `3` rather than always testing the trivial "first
-reminder" case.
+reminder email showed "Reminder (1/3)" regardless of whether it was actually the first, second, or
+third reminder. *What would have caught this earlier:* the same class of fix as bug 3 — a test
+asserting the reminder email's rendered day-number matches the row's actual `reminder_count`, using a
+fixture where `reminder_count` is deliberately set to `2` or `3` rather than always testing the trivial
+"first reminder" case.
 
 The common thread across all four, worth stating as the takeaway: **three of the four were caught by
-code review, not by any automated test** — none of this codebase's non-IWPB paths had integration test
+code review, not by any automated test.** None of this codebase's non-IWPB paths had integration test
 coverage, and the email-template bugs are a textbook case of "the code runs without error, so it looks
 fine" bugs that only realistic-fixture tests catch.
 
@@ -176,20 +186,22 @@ _ = DBSession.get(pool_recycle=1500)
 `pool_recycle=1500` (25 minutes) forces SQLAlchemy to discard and reopen any pooled connection older
 than 25 minutes, **before** using it for a new query — a direct defense against Azure SQL silently
 dropping idle connections after a period of inactivity. Without it, the first query on a connection
-that's gone stale during a quiet period fails outright with a connection error instead of the pool
-transparently reconnecting; this matters concretely for a service like this one, where traffic is
-naturally bursty around business hours with long idle stretches overnight. `pyodbc.pooling = False`
-disables `pyodbc`'s own driver-level connection pooling specifically so SQLAlchemy's pool (which
-`pool_recycle` configures) is the single, authoritative pool — running both simultaneously would mean
-two independent pooling layers with no coordination between their lifecycle assumptions, which is a
-subtle, easy-to-miss source of "works most of the time, mysteriously fails after long idle periods" bugs.
+that's gone stale during a quiet period fails outright with a connection error, instead of the pool
+transparently reconnecting. This matters concretely for a service like this one, where traffic is
+naturally bursty around business hours, with long idle stretches overnight.
+
+`pyodbc.pooling = False` disables `pyodbc`'s own driver-level connection pooling, specifically so
+SQLAlchemy's pool (which `pool_recycle` configures) is the single, authoritative pool. Running both
+simultaneously would mean two independent pooling layers with no coordination between their lifecycle
+assumptions — a subtle, easy-to-miss source of "works most of the time, mysteriously fails after long
+idle periods" bugs.
 
 The `_ingest_document_to_hexa` and `_purge_document_from_hexa` helpers in `iwpb_workflow.py` also set
 explicit `timeout=` values (`30`s for batch-initialize/purge, `60`s for the file-bytes upload call) on
-every outbound `requests` call to `INGEST_API` — a deliberate choice, since an unbounded `requests` call
-with no timeout can hang a worker indefinitely if `INGEST_API` itself stalls, which would be especially
-bad inside the background maintenance loop (a hung purge call would stall that entire sweep cycle, not
-just one request).
+every outbound `requests` call to `INGEST_API` — a deliberate choice, since an unbounded `requests`
+call with no timeout can hang a worker indefinitely if `INGEST_API` itself stalls. That would be
+especially bad inside the background maintenance loop: a hung purge call would stall that entire sweep
+cycle, not just one request.
 
 ## The hardcoded session secret: a real, named hardening gap
 
@@ -204,27 +216,30 @@ app.add_middleware(
 This is a genuine, source-confirmed hardening gap worth naming candidly rather than glossing over:
 `SessionMiddleware`'s `secret_key` is what signs the session cookie, and it's a **literal string
 constant in source**, not read from an environment variable or Key Vault. If this value were ever
-exposed (a leaked repo, a misconfigured public mirror, even just being visible to every engineer with
-read access to the codebase), anyone who has it can forge a valid, signed session cookie — including
-setting `access_token_id` to any value they choose. The fix is straightforward and low-risk: move it to
-an environment variable (`SESSION_SECRET_KEY`, sourced from App Service Application Settings today, or
-Key Vault per chapter 07's proposal) and generate a strong random value per environment, so dev/POC/PROD
-each have an independent secret and none of them is guessable from having read the source code.
+exposed — a leaked repo, a misconfigured public mirror, even just being visible to every engineer with
+read access to the codebase — anyone who has it can forge a valid, signed session cookie, including
+setting `access_token_id` to any value they choose.
+
+The fix is straightforward and low-risk: move it to an environment variable (`SESSION_SECRET_KEY`,
+sourced from App Service Application Settings today, or Key Vault per chapter 07's proposal), and
+generate a strong random value per environment, so dev/POC/PROD each have an independent secret, and
+none of them is guessable from having read the source code.
 
 ## Two things already done right, worth highlighting positively
 
-Not everything in this chapter is a gap — two existing patterns are genuinely good operational hygiene
-and worth citing as positive examples if asked "what did you do to make this production-ready":
+Not everything in this chapter is a gap — two existing patterns are genuinely good operational hygiene,
+worth citing as positive examples if asked "what did you do to make this production-ready":
 
 - **`/docs` (Swagger UI) is explicitly disabled when `ENVIRONMENT == "PROD"`.** A live, interactive API
-  explorer is a genuine liability in production (it documents every endpoint, parameter, and — for an
-  unauthenticated visitor — the shape of the attack surface) but a real convenience in dev/POC; gating
+  explorer is a genuine liability in production — it documents every endpoint, parameter, and, for an
+  unauthenticated visitor, the shape of the attack surface — but a real convenience in dev/POC. Gating
   it on environment rather than removing it everywhere is the right trade.
 - **The `/` health-probe warm-up gate.** `read_root()` returns a plain "still loading" response instead
-  of triggering an OAuth redirect for the first 180 seconds after process start (`time.time() -
-  start_time < 180`), specifically so an Azure health probe hitting `/` immediately after a cold start
-  or deploy swap doesn't get redirected into an OAuth flow it can't complete — a small, specific detail
-  that prevents a real class of "deployment looks unhealthy for the first few minutes" false alarm.
+  of triggering an OAuth redirect for the first 180 seconds after process start
+  (`time.time() - start_time < 180`), specifically so an Azure health probe hitting `/` immediately
+  after a cold start or deploy swap doesn't get redirected into an OAuth flow it can't complete — a
+  small, specific detail that prevents a real class of "deployment looks unhealthy for the first few
+  minutes" false alarm.
 
 ## Tying It Back
 

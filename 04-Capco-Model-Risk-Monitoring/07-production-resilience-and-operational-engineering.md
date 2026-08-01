@@ -51,8 +51,9 @@ Two patterns worth naming explicitly if asked "how does this pipeline handle fai
 **Two independent evaluators can write to the same per-response metric record concurrently, and a naive
 implementation corrupts the count.** The rule-based PII/toxicity gate (Tier 1, synchronous) and the
 LLM-as-judge harmfulness classifier (Tier 3, asynchronous, running some seconds later on a worker
-process) can both independently decide to flag the *same* `response_id`. If each evaluator's flagging
-logic is implemented as an application-level read-modify-write —
+process) can both independently decide to flag the *same* `response_id`.
+
+If each evaluator's flagging logic is implemented as an application-level read-modify-write —
 
 ```python
 # The naive, race-prone version

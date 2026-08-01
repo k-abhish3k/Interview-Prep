@@ -66,7 +66,23 @@ naming candidly rather than glossing over.
 task eviction, a deploy, a transient Sagemaker throttling error that exhausted its retry budget) —
 and the queue's delivery semantics are at-least-once (the realistic default for an SQS-backed or
 EventBridge-backed pipeline), **two worker instances can end up processing the same document at the
-same time**, each unaware of the other, unless something explicitly prevents it. Concretely:
+same time**, each unaware of the other, unless something explicitly prevents it.
+
+```mermaid
+sequenceDiagram
+    participant Q as Queue (at-least-once)
+    participant A as Worker A
+    participant B as Worker B
+
+    Q->>A: deliver document_id=X
+    A->>A: Stage 1, then Stage 2...
+    Note over A: task evicted mid-run,\nmessage never acknowledged
+    Q->>B: visibility timeout expires,\nredeliver document_id=X
+    B->>B: starts processing X from scratch
+    Note over A,B: if A wasn't actually dead,\nboth finish -> two citation sets for the same document
+```
+
+Concretely:
 
 - Worker A picks up `document_id=X`, starts Stage 1, and is mid-way through Stage 2 when its task is
   evicted (a Fargate spot interruption, a deploy rolling that task out) without cleanly acknowledging

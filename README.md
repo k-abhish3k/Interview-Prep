@@ -1,38 +1,43 @@
 # Interview Preparation Course — Abhishek Kumar
 
-A tutorial-style deep-dive built from your resume: 13 self-contained "courses," one per real project
-from **Capco** and **Indegene**, plus a 14th folder (course 12, numbered before the two newest additions)
-on production/development war stories. Each course teaches the underlying concepts from first
-principles, then ties them back to what you actually built, and ends with an interview-ready Q&A bank
-(behavioral + deep technical + "what would you do differently").
+A tutorial-style deep-dive built from your resume. It covers 13 self-contained "courses," one per real
+project from **Capco** and **Indegene**, plus a 14th folder — course 12, numbered before the two
+newest additions — on production/development war stories.
+
+Each course does three things:
+1. Teaches the underlying concepts from first principles.
+2. Ties those concepts back to what you actually built.
+3. Ends with an interview-ready Q&A bank: behavioral questions, deep technical questions, and "what
+   would you do differently."
 
 ## Client & Production Context (applies to every course below)
 
-- **Capco (courses 1–6, 13)**: delivered for banking clients **HSBC** and **Bank of America**. All seven
-  projects went to **production with a customer-facing interface** — not a proof-of-concept — deployed
-  on **Azure**, fronted by Azure Front Door/Application Gateway (WAF + TLS termination), secured with
-  **VNet integration / Private Endpoints** (a banking-grade requirement — no service should be reachable
-  over the public internet without going through the gateway), **Azure AD** for auth, and monitored with
-  **Azure Monitor / Application Insights**. Courses 1–6 run on **Azure App Service**; course 13 is a
-  self-hosted open-weight model on **Azure ML / AKS** instead — see its course note for why. Each
-  project's `00-README.md` and `99-Interview-QA.md` reflect this: daily production traffic, uptime
-  expectations, and per-bank tenant isolation (HSBC's data must never be visible to Bank of America's
-  environment, and vice versa).
-- **Indegene (courses 7–11, 14)**: delivered for life-sciences clients **Eli Lilly**, **AstraZeneca**, and
-  other top healthcare/pharma companies. All six projects went to **production with a customer-facing
-  interface**, deployed on **AWS**. Courses 7–11 use **ECS (Fargate)** for the containerized application
-  tier behind an **ALB**, **Sagemaker** real-time endpoints for model inference, **Lambda + API Gateway**
-  for event-driven/lightweight endpoints, **S3** for artifacts/documents, **CloudWatch** for
-  observability, and **Secrets Manager** for credentials; course 14 is a self-hosted open-weight model
-  on **AWS Sagemaker batch/async inference** instead — see its course note for why. Pharma compliance
-  considerations (GxP-style validation, content review/audit trails, PHI-adjacent data handling) are
-  called out where relevant.
-- **A confidentiality note before you use any of this in a real interview**: consulting engagements are
-  almost always covered by client-confidentiality clauses. Before naming HSBC, Bank of America, Eli
-  Lilly, or AstraZeneca by name to an interviewer, check what your actual NDA/engagement letter allows —
-  many candidates safely say "a top-3 global bank" or "a top-10 pharma company" instead. The content here
-  uses the real names so *you* have full context while studying; swap in the safe phrasing for the
-  interview itself if needed.
+- **Capco (courses 1–6, 13)** — delivered for banking clients **HSBC** and **Bank of America**. All
+  seven projects went to **production with a customer-facing interface**, not just a
+  proof-of-concept. They ran on **Azure**, sitting behind Azure Front Door/Application Gateway (WAF +
+  TLS termination), secured with **VNet integration / Private Endpoints** — a banking-grade
+  requirement: no service should be reachable over the public internet without going through the
+  gateway — with **Azure AD** for auth and **Azure Monitor / Application Insights** for monitoring.
+  Courses 1–6 run on **Azure App Service**; course 13 is different — a self-hosted, open-weight model
+  on **Azure ML / AKS** instead (see its course note for why). Each project's `00-README.md` and
+  `99-Interview-QA.md` reflect this: daily production traffic, uptime expectations, and per-bank
+  tenant isolation, meaning HSBC's data must never be visible inside Bank of America's environment,
+  and vice versa.
+- **Indegene (courses 7–11, 14)** — delivered for life-sciences clients **Eli Lilly**, **AstraZeneca**,
+  and other top healthcare/pharma companies. All six projects went to **production with a
+  customer-facing interface**, deployed on **AWS**. Courses 7–11 use **ECS (Fargate)** for the
+  containerized application tier behind an **ALB**, **SageMaker** real-time endpoints for model
+  inference, **Lambda + API Gateway** for event-driven/lightweight endpoints, **S3** for
+  artifacts/documents, **CloudWatch** for observability, and **Secrets Manager** for credentials.
+  Course 14 is different — a self-hosted, open-weight model on **AWS SageMaker batch/async
+  inference** instead (see its course note for why). Pharma compliance considerations — GxP-style
+  validation, content review/audit trails, PHI-adjacent data handling — are called out where relevant.
+- **A confidentiality note before you use any of this in a real interview.** Consulting engagements
+  are almost always covered by client-confidentiality clauses. Before naming HSBC, Bank of America,
+  Eli Lilly, or AstraZeneca to an interviewer, check what your actual NDA/engagement letter allows —
+  many candidates safely say "a top-3 global bank" or "a top-10 pharma company" instead. The content
+  here uses the real names so *you* have full context while studying; swap in the safe phrasing for
+  the interview itself if needed.
 
 ## How each course folder is organized
 
@@ -44,23 +49,33 @@ NN-Project-Name/
   notebooks/                Runnable Jupyter notebooks with hands-on, from-scratch examples
 ```
 
-Read each course in order: `00-README.md` -> chapters `01..0N` -> notebooks (run them side by side
-with the corresponding chapter) -> `99-Interview-QA.md` last, once the concepts are fresh.
+Read each course in this order: `00-README.md` → chapters `01..0N` → notebooks, run side by side with
+the matching chapter → `99-Interview-QA.md` last, once the concepts are fresh.
 
 ## Course Map
 
-> Every one of courses 1, 4–11 also includes a **data-lifecycle/staleness-versioning chapter** and a
-> **production-resilience-and-operational-engineering chapter** — a pattern generalized from course 5's
-> real-source-grounded rebuild (see its course note) and adapted to each project's own domain: RAG
-> knowledge staleness (course 1), monitoring-baseline drift (course 4), document revisions (course 5,
-> the real one), multi-service version pinning (course 6), OCR reprocessing/dedup (course 7), Pinecone
-> vector staleness (course 8), approved-claims-library versioning (course 9), detection-result
-> dedup/model-version drift (course 10), and clinical protocol-amendment versioning (course 11).
-> Course 12 ties the pattern together across all of them. These are the newest, most technically dense
-> chapters in those courses — read them last within each one, right before `99-Interview-QA.md`.
-> (Courses 2, 3, 13, and 14 are newer additions with their own equivalent chapters — see their own course
-> notes: course 2's data-freshness-at-signoff chapter, course 3's model-version-pinning chapter, and
-> courses 13/14's matched pair on base-model-vs-fine-tuning/taxonomy staleness.)
+> A recurring pair of chapters shows up across most courses: a **data-lifecycle/staleness-versioning
+> chapter** and a **production-resilience-and-operational-engineering chapter**. This pattern was
+> generalized from course 5's real-source-grounded rebuild (see its course note), then adapted to each
+> project's own domain:
+>
+> - RAG knowledge staleness — course 1
+> - Monitoring-baseline drift — course 4
+> - Document revisions (the real one) — course 5
+> - Multi-service version pinning — course 6
+> - OCR reprocessing/dedup — course 7
+> - Pinecone vector staleness — course 8
+> - Approved-claims-library versioning — course 9
+> - Detection-result dedup / model-version drift — course 10
+> - Clinical protocol-amendment versioning — course 11
+>
+> Course 12 ties this whole pattern together across all of them. These are the newest, most
+> technically dense chapters in those courses — read them last within each one, right before
+> `99-Interview-QA.md`.
+>
+> Courses 2, 3, 13, and 14 are newer additions with their own equivalent chapters — see their own
+> course notes: course 2's data-freshness-at-signoff chapter, course 3's model-version-pinning
+> chapter, and courses 13/14's matched pair on base-model-vs-fine-tuning/taxonomy staleness.
 
 | # | Folder | Company | Resume Project | Core Skills Covered |
 |---|--------|---------|-----------------|----------------------|
@@ -86,22 +101,23 @@ every bullet from your "Strengths and Expertise" section is mapped to at least o
 
 ## Suggested Study Plan
 
-- **Week 1**: Courses 1, 2, 3, 4, 5, 6 (Capco / GenAI backend + DevOps track)
-- **Week 2**: Courses 7, 10 (Computer Vision track)
-- **Week 3**: Courses 8, 9, 11 (Indegene GenAI/NLP track)
-- **Week 4**: Courses 13, 14 (open-weight model architecture + self-hosting track — read together, they're
-  designed as a matched pair: same chapter shape, different cloud, different model, same "what's genuinely
-  known vs. undisclosed" discipline course 3's Chapter 8 introduces)
-- **Final pass**: Re-read every `99-Interview-QA.md`, then do a mock interview covering one project
-  from each company chosen at random.
+- **Week 1**: Courses 1, 2, 3, 4, 5, 6 — the Capco / GenAI backend + DevOps track.
+- **Week 2**: Courses 7, 10 — the Computer Vision track.
+- **Week 3**: Courses 8, 9, 11 — the Indegene GenAI/NLP track.
+- **Week 4**: Courses 13, 14 — the open-weight model architecture + self-hosting track. Read these two
+  together; they're designed as a matched pair — same chapter shape, different cloud, different model,
+  same "what's genuinely known vs. undisclosed" discipline that course 3's Chapter 8 introduces.
+- **Final pass**: Re-read every `99-Interview-QA.md`. Then do a mock interview covering one project
+  from each company, chosen at random.
 
 ## General Interview Strategy
 
 - Every project doc's **STAR summary** (Situation/Task/Action/Result) is your answer skeleton for
   "tell me about a project where you..." questions. Practice saying it out loud in under 90 seconds.
-- Have **one number** ready per project (accuracy uplift, TPR, latency, cost saved, time saved) —
-  interviewers remember quantified results.
-- For every project, be ready for the follow-up **"what would you change if you rebuilt this today?"**
-  — each `99-Interview-QA.md` includes a suggested answer.
+- Have **one number** ready per project — accuracy uplift, TPR, latency, cost saved, time saved.
+  Interviewers remember quantified results.
+- For every project, be ready for the follow-up **"what would you change if you rebuilt this
+  today?"** Each `99-Interview-QA.md` includes a suggested answer.
 - Course 12 is your answer bank for the near-universal "tell me about your most challenging technical
-  problem" and "tell me about a production incident" questions — read it last, right before the interview.
+  problem" and "tell me about a production incident" questions. Read it last, right before the
+  interview.

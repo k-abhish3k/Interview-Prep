@@ -2,28 +2,27 @@
 
 ## Why this chapter matters
 
-"HybridSearch RAG" is a named skill on the resume, distinct from plain RAG, and it maps cleanly onto
-the two sub-features most likely to suffer from pure dense retrieval: project codenames ("Project
-Atlas", "SKU-JP-4471") and the cost catalog. This chapter explains precisely *why* dense retrieval
-alone fails on exact identifiers, how sparse retrieval fixes it, and how the two get fused into one
-ranking — a question almost guaranteed to come up as "hybrid search vs. pure dense — when does it
-matter?"
+"HybridSearch RAG" is a named skill on the resume, distinct from plain RAG. It maps cleanly onto the
+two sub-features most likely to suffer from pure dense retrieval: project codenames ("Project Atlas",
+"SKU-JP-4471") and the cost catalog. This chapter explains precisely *why* dense retrieval alone fails
+on exact identifiers, how sparse retrieval fixes it, and how the two get fused into one ranking — a
+question almost guaranteed to come up as "hybrid search vs. pure dense — when does it matter?"
 
 ## Where Pure Dense Retrieval Breaks Down
 
-Chapter 1 covered dense retrieval: embed the query and every chunk, rank by vector similarity.
+Chapter 1 covered dense retrieval: embed the query and every chunk, then rank by vector similarity.
 Embeddings are excellent at capturing *meaning* — "how long for the translation" matching a chunk
 about "localization turnaround time" despite no shared words. But embeddings are comparatively weak
 at **exact lexical matching** of low-frequency, high-specificity tokens:
 
 - **Project codenames** like "Project Atlas" or internal IDs like "PRJ-2024-0119" are often
-  out-of-vocabulary or rare in the embedding model's training data — the model has no strong learned
-  representation for a string it's essentially never seen, so semantically-similar-looking but wrong
+  out-of-vocabulary or rare in the embedding model's training data. The model has no strong learned
+  representation for a string it's essentially never seen — so semantically-similar-looking but wrong
   codenames can end up embedded close to the right one.
 - **Cost-catalog SKUs** ("SKU-LOC-JP-STD", "CAT-4471-B") are effectively arbitrary strings from the
-  embedding model's point of view — there's no "meaning" for the model to capture, only an identity
-  to match exactly.
-- A client asking "what's the price for SKU-4471" needs that literal token found, not something
+  embedding model's point of view. There's no "meaning" for the model to capture, only an identity to
+  match exactly.
+- A client asking "what's the price for SKU-4471" needs that literal token found — not something
   semantically adjacent to it.
 
 Keyword-based (sparse) retrieval is the inverse: strong on exact/near-exact term matching, weak on
@@ -33,19 +32,18 @@ precision at the same time — neither alone covers what the Virtual Liaison's q
 
 ## Sparse Retrieval: BM25
 
-BM25 (Best Matching 25) is the standard modern sparse-retrieval algorithm — a refinement of TF-IDF
-that scores how well a document matches a query based on term frequency, inverse document frequency,
-and document-length normalization.
+BM25 (Best Matching 25) is the standard modern sparse-retrieval algorithm. It's a refinement of TF-IDF
+that scores how well a document matches a query, based on three things:
 
-- **Term frequency (TF)**: how often a query term appears in a document — more occurrences suggest
-  stronger relevance, with diminishing returns (a term appearing 10 times isn't 10x as relevant as
-  once).
+- **Term frequency (TF)**: how often a query term appears in a document. More occurrences suggest
+  stronger relevance, with diminishing returns — a term appearing 10 times isn't 10x as relevant as
+  once.
 - **Inverse document frequency (IDF)**: rare terms across the corpus are more informative than common
-  ones — "SKU-4471" appearing in a document is far more discriminating than the word "project"
+  ones. "SKU-4471" appearing in a document is far more discriminating than the word "project"
   appearing in it, since "project" appears almost everywhere.
-- **Length normalization**: a long document naturally contains more term matches by chance; BM25
-  discounts for that so short, precisely-matching chunks aren't unfairly outranked by long, loosely-
-  matching ones.
+- **Length normalization**: a long document naturally contains more term matches by chance. BM25
+  discounts for that, so short, precisely-matching chunks aren't unfairly outranked by long,
+  loosely-matching ones.
 
 ```python
 from rank_bm25 import BM25Okapi
@@ -66,14 +64,23 @@ Once you have two independent rankings of the same candidate chunks — one from
 similarity — you need to combine them into a single ranking. The scores aren't on comparable scales
 (BM25 scores and cosine similarities live in different ranges and distributions), so naively summing
 them is unreliable. **Reciprocal Rank Fusion (RRF)** sidesteps that by combining **ranks**, not raw
-scores:
+scores.
+
+```mermaid
+flowchart LR
+    Q["Query"] --> BM["BM25 (sparse)<br/>ranked list"]
+    Q --> DE["Dense embedding<br/>ranked list"]
+    BM --> RRF["Reciprocal Rank Fusion<br/>(combine by rank position)"]
+    DE --> RRF
+    RRF --> OUT["Fused top-K"]
+```
 
 ```
 RRF_score(doc) = sum over each ranking r of  1 / (k + rank_r(doc))
 ```
 
-where `rank_r(doc)` is the document's position (1st, 2nd, 3rd...) in ranking `r`, and `k` is a small
-constant (commonly 60) that dampens the influence of very low ranks so a document ranked 1st isn't
+Here, `rank_r(doc)` is the document's position (1st, 2nd, 3rd...) in ranking `r`, and `k` is a small
+constant (commonly 60) that dampens the influence of very low ranks, so a document ranked 1st isn't
 overwhelmingly dominant versus one ranked 3rd.
 
 ```python
@@ -88,12 +95,11 @@ def reciprocal_rank_fusion(rankings: list[list[str]], k: int = 60) -> dict[str, 
 fused = reciprocal_rank_fusion([dense_ranked_ids, bm25_ranked_ids])
 ```
 
-A document that ranks well in **both** lists accumulates score from both terms and rises to the top
-of the fused ranking; a document that only one method liked still gets some credit, which is exactly
-the desired behavior — a chunk that's the *exact* SKU match (top of BM25, maybe mediocre in dense) and
-a chunk that's the best *semantic* match (top of dense, maybe mediocre in BM25) should both surface
-near the top, and RRF achieves that without needing to calibrate BM25 and cosine scores onto the same
-scale.
+A document that ranks well in **both** lists accumulates score from both terms and rises to the top of
+the fused ranking. A document that only one method liked still gets some credit — which is exactly the
+desired behavior. A chunk that's the *exact* SKU match (top of BM25, maybe mediocre in dense) and a
+chunk that's the best *semantic* match (top of dense, maybe mediocre in BM25) should both surface near
+the top, and RRF achieves that without needing to calibrate BM25 and cosine scores onto the same scale.
 
 ## Applying This to the Virtual Liaison's Two RAG Pipelines
 
@@ -116,20 +122,22 @@ def hybrid_retrieve(query: str, top_k: int = 5):
 ```
 
 Some vector databases (Pinecone included, via sparse-dense vectors on suitable index configurations)
-support hybrid search natively; the fallback — and the version worth being able to explain and
+support hybrid search natively. The fallback — and the version worth being able to explain and
 implement from scratch, since it's the version an interviewer can ask you to whiteboard — is running
 BM25 and dense retrieval as two independent passes and fusing the results in the application layer,
 exactly as above.
 
 ## The Trade-off to Name Explicitly
 
-Hybrid search isn't free: it means maintaining two retrieval indexes (a BM25/inverted index alongside
+Hybrid search isn't free. It means maintaining two retrieval indexes (a BM25/inverted index alongside
 the vector index), running two searches per query instead of one, and an extra fusion step — added
-latency and operational surface area. The right framing for an interview: hybrid search earns its
-cost specifically when the query distribution includes a meaningful share of exact-identifier lookups
-alongside natural-language questions, which is exactly the mix a cost-catalog and project-codename
-system produces. For a purely conversational FAQ system with no structured identifiers in play, plain
-dense retrieval is usually good enough, and hybrid search would be over-engineering.
+latency and operational surface area.
+
+The right framing for an interview: hybrid search earns its cost specifically when the query
+distribution includes a meaningful share of exact-identifier lookups alongside natural-language
+questions — which is exactly the mix a cost-catalog and project-codename system produces. For a purely
+conversational FAQ system with no structured identifiers in play, plain dense retrieval is usually
+good enough, and hybrid search would be over-engineering.
 
 ## Tying It Back
 

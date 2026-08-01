@@ -6,32 +6,33 @@
 > Azure environment."*
 >
 > This course started as a research-only evaluation of Claude against the enterprise Azure OpenAI
-> baseline. It has since been elevated, at the candidate's request, to a full **industry-level,
-> production** engagement — a real Capco client deliverable, at the same tier as courses 1 and 2 — built
-> around a task shape neither of those courses covers: **agentic AI involving multiple cooperating
-> agents**, rather than a single model answering in one call. Everything the original research framing
-> got right about governance, vendor risk, and version discipline is preserved below; what changed is
-> the system itself and what it's for.
+> baseline. Since then, at the candidate's request, it has been raised to a full **industry-level,
+> production** engagement — a real Capco client deliverable, at the same tier as courses 1 and 2. It's
+> now built around a task shape neither of those courses covers: **agentic AI, where multiple cooperating
+> agents work together**, instead of a single model answering in one call. Everything the original
+> research framing got right — about governance, vendor risk, and version discipline — is still true and
+> still covered below. What changed is the system itself, and what it's for.
 
 ## A correction to make early, and confidently — still needed, still real
 
-The candidate's own framing of this project, in an earlier pass, described it as evaluating an **"open
-source Claude model."** That's worth catching and fixing before anything else in this course, the same
-way course 5 catches and fixes a misremembered client/system name up front rather than letting it
-propagate — get corrected once, cleanly, rather than repeating an error across nine files and an
-interview.
+In an earlier pass, the candidate's own description of this project called it an evaluation of an
+**"open source Claude model."** That's worth catching and fixing before anything else in this course —
+the same way course 5 catches and fixes a misremembered client/system name right at the start. Better to
+correct it once, cleanly, than to repeat the error across nine files and then again in an interview.
 
-**Anthropic's Claude models are proprietary and closed-weight.** You cannot download Claude's model
-weights and run them on your own hardware, the way you genuinely can with an open-weight model such as
-Meta's LLaMA (course 11 covers a real open-weight LLaMA 3 deployment — read it side by side with this
-course for the contrast; Chapter 8 of this course goes further, contrasting Claude's undisclosed
-architecture against genuinely published architectures from courses 11, 13, and 14). Claude is
-available only through **hosted API access**: directly from Anthropic, or through cloud marketplaces,
-including **Azure AI Foundry's model catalog**. There is no version of "self-host Claude in our own
-datacenter" on the table, at any tier — and that fact is exactly as true for a production multi-agent
-system as it was for the original research pilot.
+**Anthropic's Claude models are proprietary and closed-weight.** In plain terms: you cannot download
+Claude's model weights and run them on your own hardware. That's genuinely possible with an open-weight
+model, such as Meta's LLaMA — course 11 covers a real open-weight LLaMA 3 deployment, worth reading side
+by side with this course for the contrast. Chapter 8 of this course goes further, contrasting Claude's
+undisclosed architecture against the genuinely published architectures covered in courses 11, 13, and 14.
 
-The accurate way to describe this project — and the sentence to actually say in an interview — is:
+Claude is available only through **hosted API access** — either directly from Anthropic, or through a
+cloud marketplace, including **Azure AI Foundry's model catalog**. There is no version of "self-host
+Claude in our own datacenter," at any tier. That's exactly as true for a production multi-agent system as
+it was for the original research pilot.
+
+The accurate way to describe this project — and the sentence worth having ready, verbatim, in an
+interview — is:
 
 > *"A production multi-agent credit underwriting system that calls Claude — accessed via Azure AI
 > Foundry's model catalog, within the same Azure tenant as our enterprise Azure OpenAI deployment, not
@@ -39,44 +40,53 @@ The accurate way to describe this project — and the sentence to actually say i
 > specifically because the task shape (multi-step, multi-agent coordination) plays to Claude's
 > publicly-announced agentic strengths."*
 
-That correction also does most of the work of explaining the Azure product landscape this course
-depends on: the real technical difference between **Azure OpenAI Service** (OpenAI models only, full
-stop — it cannot serve a non-OpenAI model, that's not a configuration option, it's an architectural
-fact about the product) and **Azure AI Foundry** — formerly Azure AI Studio — whose **Model Catalog** is
-a broader, multi-vendor catalog that includes Claude (via Anthropic), Meta's Llama family, Mistral, and
-others. "The same Azure environment" is achieved through Azure AI Foundry, not through Azure OpenAI
-Service, because Azure OpenAI Service architecturally cannot be the thing that serves Claude. Chapter 1
-goes deep on this distinction.
+That correction also explains most of the Azure product landscape this course depends on. There's a real
+technical difference between two Azure products:
+
+- **Azure OpenAI Service** — serves OpenAI models only, full stop. That's not a configuration option
+  someone forgot to enable; it's an architectural fact about the product.
+- **Azure AI Foundry** (formerly Azure AI Studio) — its **Model Catalog** is a broader, multi-vendor
+  catalog. It includes Claude (via Anthropic), Meta's Llama family, Mistral, and others.
+
+So "the same Azure environment" is achieved through Azure AI Foundry, not through Azure OpenAI Service —
+because Azure OpenAI Service architecturally cannot be the thing that serves Claude. Chapter 1 goes deep
+on this distinction.
 
 ## What kind of project this is now
 
 Courses 1, 2, and 4–11 in this curriculum are **client-delivery** engagements: systems built for a
-paying client, under that client's compliance requirements, that went to production serving real
-users. This course is now that too — a production Capco deliverable for the same banking-client
-context as this curriculum's other Capco courses (HSBC/Bank of America; see the root
-[`README.md`](../README.md)'s Client & Production Context section for the full framing and the
-confidentiality note on naming real clients in an interview).
+paying client, under that client's compliance requirements, that went live serving real users. This
+course is now that too — a production Capco deliverable for the same banking-client context as this
+curriculum's other Capco courses (HSBC/Bank of America; see the root [`README.md`](../README.md)'s
+Client & Production Context section for the full framing and the confidentiality note on naming real
+clients in an interview).
 
-What makes this course structurally distinct from courses 1 and 2 isn't its production status anymore
-— it's the **task shape**. Course 1 is a single-turn conversational RAG chatbot: one user question, one
-retrieval pass, one model call, one answer. Course 2 is single-shot structured document generation: one
-case, one retrieval pass across three source types, one model call that drafts a structured, cited
-narrative. This course is neither. **Commercial loan underwriting doesn't decompose into one retrieval
-pass and one generation call** — it requires several genuinely distinct kinds of analysis (spreading a
-borrower's financials into ratios, checking those ratios and the borrower's profile against a written
-credit policy, scoring external risk factors, and synthesizing all of that into a defensible written
-recommendation) that benefit from being handled by separate, specialized agents rather than one
-enormous prompt asking a single model to do everything in one call. That's the premise this course now
-tests, and it's why the backbone model choice matters differently here than it did for a chatbot or a
-document generator — see Chapter 8 and "Why Claude, specifically, for this system" below.
+What makes this course structurally different from courses 1 and 2 isn't its production status anymore —
+it's the **task shape**.
+
+- Course 1 is a single-turn conversational RAG chatbot: one user question, one retrieval pass, one model
+  call, one answer.
+- Course 2 is single-shot structured document generation: one case, one retrieval pass across three
+  source types, one model call that drafts a structured, cited narrative.
+- This course is neither. **Commercial loan underwriting doesn't decompose into one retrieval pass and
+  one generation call.** It genuinely needs several distinct kinds of analysis: spreading a borrower's
+  financials into ratios, checking those ratios and the borrower's profile against a written credit
+  policy, scoring external risk factors, and synthesizing all of it into a defensible written
+  recommendation. Those four jobs benefit from being handled by separate, specialized agents rather than
+  one enormous prompt asking a single model to do everything in one call.
+
+That's the premise this course tests. It's also why the backbone model choice matters differently here
+than it did for a chatbot or a document generator — see Chapter 8 and "Why Claude, specifically, for
+this system," below.
 
 ## The system: Multi-Agent Credit Underwriting Assistant
 
-A five-agent system (four specialist agents plus a supervisor/orchestrator) that accelerates commercial
+A five-agent system — four specialist agents plus a supervisor/orchestrator — that speeds up commercial
 loan underwriting by dividing the work the way a real underwriting team would, rather than asking one
-model to hold the entire task in its head at once. A human loan officer remains the final
-decision-maker on every case — the system produces a **draft recommendation**, never an autonomous
-underwriting decision.
+model to hold the entire task in its head at once.
+
+A human loan officer remains the final decision-maker on every case. The system produces a **draft
+recommendation**, never an autonomous underwriting decision.
 
 | # | Agent | Role |
 |---|---|---|
@@ -87,61 +97,97 @@ underwriting decision.
 | 5 | **Supervisor/Orchestrator Agent** | Coordinates agents 1–4: decides routing and sequencing, runs independent steps in parallel, decides when enough information has been gathered, and escalates ambiguous or incomplete cases back to a human loan officer rather than guessing. |
 | — | **Human loan officer sign-off** | Not an agent — the mandatory human-in-the-loop gate, the same pattern established across this curriculum (course 2's compliance officer, course 11's regulatory reviewer). The Supervisor Agent's output is a draft recommendation; a human loan officer must approve it before it becomes an underwriting decision. |
 
-Two of the four specialist agents have no data dependency on each other: the **Financial Spreading
-Agent** and the **Risk Assessment Agent** can both start as soon as the loan application and supporting
-documents are available, and can run in parallel. The other two are sequentially dependent: the
-**Credit Policy Compliance Agent** needs the Financial Spreading Agent's ratios to check against policy
-thresholds, and the **Underwriting Memo Drafting Agent** needs all three other agents' outputs before it
-can draft anything. The Supervisor Agent is what actually knows and enforces this dependency graph —
-see `notebooks/05_multi_agent_supervisor_routing_demo.ipynb` for a runnable demonstration of exactly
-this parallel/sequential split.
+Two of the four specialist agents don't need anything from each other, so they can run at the same time:
+the **Financial Spreading Agent** and the **Risk Assessment Agent** can both start as soon as the loan
+application and supporting documents are available.
+
+The other two are sequentially dependent:
+
+- The **Credit Policy Compliance Agent** needs the Financial Spreading Agent's ratios before it can check
+  them against policy thresholds.
+- The **Underwriting Memo Drafting Agent** needs all three other agents' outputs before it can draft
+  anything.
+
+The Supervisor Agent is what actually knows and enforces this dependency graph. See
+`notebooks/05_multi_agent_supervisor_routing_demo.ipynb` for a runnable demonstration of exactly this
+parallel/sequential split.
+
+```mermaid
+flowchart LR
+    APP[Loan application<br/>+ documents] --> FIN[Financial Spreading Agent]
+    APP --> RISK[Risk Assessment Agent]
+    FIN -- ratios --> COMP[Credit Policy Compliance Agent]
+    FIN --> MEMO[Underwriting Memo Drafting Agent]
+    RISK --> MEMO
+    COMP --> MEMO
+    MEMO --> SUP[Supervisor synthesizes<br/>+ checks completeness]
+
+    style FIN fill:#e8f4ea,stroke:#333
+    style RISK fill:#e8f4ea,stroke:#333
+```
+*Financial Spreading and Risk Assessment (shaded) have no dependency on each other and run in parallel.
+Compliance and Memo Drafting must wait for their inputs and run sequentially.*
 
 ## Why multiple agents instead of one well-prompted model
 
-The honest, defensible reason — and the one to give if an interviewer pushes on "couldn't you just
-write one really good prompt": a single model call asked to spread financials, check policy, assess
-risk, *and* draft a cited memo in one pass has to hold all four jobs in its attention simultaneously,
-with a single, undifferentiated context window mixing four different kinds of source material. That's
-exactly the shape of task where task-specific specialization pays off — a Financial Spreading Agent's
-system prompt and tool access can be tuned purely for extraction accuracy, without competing for
-attention against a completely different task like policy-threshold checking. It also gets you the
-architectural benefits Chapter 7 covers in depth: independent agents can fail independently (a Risk
-Assessment Agent outage doesn't have to take down the whole pipeline), independent agents can run in
-parallel where their outputs don't depend on each other, and a supervisor with an explicit escalation
-path can recognize "I don't have enough to proceed" and route to a human, rather than a single model
-silently doing its best across four jobs it was never given room to think through separately.
+Here's the honest, defensible reason — the one to give if an interviewer pushes on "couldn't you just
+write one really good prompt?"
+
+A single model call asked to spread financials, check policy, assess risk, *and* draft a cited memo — all
+in one pass — has to hold all four jobs in its attention at the same time, with a single, undifferentiated
+context window mixing four different kinds of source material. That's exactly the shape of task where
+task-specific specialization pays off. A Financial Spreading Agent's system prompt and tool access can be
+tuned purely for extraction accuracy, without competing for attention against a completely different task
+like policy-threshold checking.
+
+Splitting the work into agents also buys real architectural benefits, covered in depth in Chapter 7:
+
+- **Independent agents can fail independently.** A Risk Assessment Agent outage doesn't have to take down
+  the whole pipeline.
+- **Independent agents can run in parallel** where their outputs don't depend on each other.
+- **A supervisor with an explicit escalation path can recognize "I don't have enough to proceed"** and
+  route to a human — rather than a single model silently doing its best across four jobs it was never
+  given room to think through separately.
 
 ## Why Claude, specifically, for this system
 
 This is the connective tissue between Chapter 8 and this project, and it's worth making the argument
-explicitly rather than asserting it. Chapter 8 is deliberately honest that Claude's *internal
-architecture* is undisclosed — that's not something this course can use as a reason to prefer Claude.
-What Chapter 8 *does* establish, because both are genuinely, publicly announced by Anthropic, are
-extended-thinking (careful, allocatable inference-time reasoning) and computer-use (agentic,
-tool-driven interaction with software) as real, documented capability investments — on top of the
-tool-use/function-calling support both major vendors already provide. **Multi-agent orchestration is
-precisely the task shape where those specific, documented strengths are most relevant**: a Supervisor
-Agent deciding whether enough information has been gathered, or a Financial Spreading Agent reasoning
-through an ambiguous line item before calling a tool, is exactly the kind of careful, multi-step,
-tool-mediated reasoning those announced capabilities target.
+explicitly rather than just asserting it.
+
+Chapter 8 is deliberately honest that Claude's *internal architecture* is undisclosed — that's not
+something this course can use as a reason to prefer Claude. What Chapter 8 *does* establish, because both
+are genuinely, publicly announced by Anthropic, are two real, documented capability investments:
+
+- **Extended thinking** — careful, allocatable inference-time reasoning.
+- **Computer use** — agentic, tool-driven interaction with software.
+
+These sit on top of the tool-use/function-calling support both major vendors already provide.
+**Multi-agent orchestration is precisely the task shape where those specific, documented strengths are
+most relevant.** A Supervisor Agent deciding whether enough information has been gathered, or a Financial
+Spreading Agent reasoning through an ambiguous line item before calling a tool — both are exactly the
+kind of careful, multi-step, tool-mediated reasoning those announced capabilities target.
 
 Contrast this with courses 1 and 2: a single-turn chatbot (course 1) and a single-shot structured
 generator (course 2) are tasks where GPT-4/Azure OpenAI was the enterprise-standard, uncontroversial
-default, and no particular agentic capability was being tested by choosing one vendor over another.
+default. No particular agentic capability was being tested by choosing one vendor over another in either
+case.
+
 This course's original premise — "let's evaluate Claude as an alternative to our enterprise GPT
-deployment" — is now sharper than a generic vendor bake-off: it's **"let's evaluate Claude specifically
+deployment" — is now sharper than a generic vendor bake-off. It's **"let's evaluate Claude specifically
 for the task shape — multi-agent orchestration — where its publicly-known strengths are most
-relevant,"** which is a defensible engineering argument, not a preference.
+relevant."** That's a defensible engineering argument, not a preference.
 
 ## Architecture: same governance, new backend, new task shape
 
-The single design principle worth internalizing before the diagram: **production doesn't mean a lower
-security bar just because the backend is new.** The Claude backend for this system lives inside the
-exact same Azure tenant, the exact same VNet, and is gated by the exact same Azure AD/RBAC model as the
-production Azure OpenAI deployments serving course 1 and course 2 today. What's new is the model
-backend and the orchestration layer sitting in front of it — not the network boundary, the identity
-plane, or the observability plane, and critically, not the human-sign-off requirement that governs
-every other GenAI system in this curriculum's banking courses.
+Here's the single design principle worth internalizing before the diagram: **production doesn't mean a
+lower security bar just because the backend is new.**
+
+The Claude backend for this system lives inside the exact same Azure tenant, the exact same VNet, and is
+gated by the exact same Azure AD/RBAC model as the production Azure OpenAI deployments already serving
+course 1 and course 2. What's new is the model backend and the orchestration layer sitting in front of
+it — not the network boundary, not the identity plane, not the observability plane, and critically, not
+the human-sign-off requirement that governs every other GenAI system in this curriculum's banking
+courses.
 
 ```mermaid
 flowchart TB
@@ -230,12 +276,12 @@ model backend, all inside the same Private-Endpoint-gated, Azure-AD-governed VNe
 Azure OpenAI deployments serving course 1 and course 2.
 ```
 
-The point encoded in that diagram, stated directly: standing up a five-agent orchestration layer did
-not mean standing up a separate, lighter-weight environment "because it's agentic and new." It meant
-adding one Azure AI Foundry endpoint and one orchestrator application (the LangGraph state graph,
-described in depth in Chapter 4 alongside course 8's LangGraph fundamentals chapter) inside
-infrastructure that already existed. Chapter 4 covers this production deployment — how the orchestrator
-was actually hosted, and how the rollout to real loan applications was staged — in depth.
+Here's the point encoded in that diagram, stated directly: standing up a five-agent orchestration layer
+did **not** mean standing up a separate, lighter-weight environment "because it's agentic and new." It
+meant adding one Azure AI Foundry endpoint and one orchestrator application (the LangGraph state graph,
+described in depth in Chapter 4 alongside course 8's LangGraph fundamentals chapter) inside infrastructure
+that already existed. Chapter 4 covers this production deployment — how the orchestrator was actually
+hosted, and how the rollout to real loan applications was staged — in depth.
 
 ## STAR Summary (illustrative — practice out loud, under 90 seconds)
 
@@ -303,14 +349,18 @@ chapter with the matching concept.
 
 ## A note on how to talk about this project honestly
 
-Everything in this course past the Azure OpenAI-vs-Azure-AI-Foundry technical distinction and the
-"Claude is not open source" correction — both real, confirmed facts, stated plainly rather than hedged
-— is a plausible, technically detailed, clearly labeled illustrative reconstruction, exactly like every
-other course in this curriculum that isn't backed by real recovered source (see course 5's note on that
-exception). Treat the specific numbers, the exact agent roster behavior, and the precise rollout outcome
-as a defensible story to tell, not a verified transcript — and say so if an interviewer presses for
-detail you don't actually have. "Here's the architecture and process I'd defend" is a stronger answer
-than a suspiciously too-perfect memory of a multi-agent system's internal numbers.
+Everything in this course, past two specific points, is a plausible, technically detailed, clearly
+labeled illustrative reconstruction — exactly like every other course in this curriculum that isn't
+backed by real recovered source (see course 5's note on that exception). Those two points are:
+
+1. The Azure OpenAI-vs-Azure-AI-Foundry technical distinction, and
+2. The "Claude is not open source" correction.
+
+Both of those are real, confirmed facts, stated plainly rather than hedged. Everything past them —
+specific numbers, the exact agent roster behavior, the precise rollout outcome — should be treated as a
+defensible story to tell, not a verified transcript. Say so if an interviewer presses for detail you
+don't actually have. "Here's the architecture and process I'd defend" is a stronger answer than a
+suspiciously too-perfect memory of a multi-agent system's internal numbers.
 
 ---
 

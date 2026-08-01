@@ -2,30 +2,32 @@
 
 ## Why this chapter matters
 
-The resume's broader skill list includes "Terraform Scripts" alongside Azure DevOps — the pipeline
-in chapter 02 automates *code* deployment, but something has to define and provision the Azure
+The resume's broader skill list includes "Terraform Scripts" alongside Azure DevOps. The pipeline in
+chapter 02 automates *code* deployment — but something has to define and provision the Azure
 resources that code runs on (the App Service, the Key Vault, the database) in a way that's
 repeatable across dev/staging/prod and across client environments. That's what Terraform is for.
-This chapter covers Terraform's core model and walks through a worked example provisioning an Azure
-App Service + Key Vault — the infrastructure shape underneath both the chatbot (course 01) and
+
+This chapter covers Terraform's core model, then walks through a worked example provisioning an
+Azure App Service + Key Vault — the infrastructure shape underneath both the chatbot (course 01) and
 document-uploader (course 05) services.
 
 ## Why Infrastructure as Code, Specifically
 
-Before Terraform's mechanics, it's worth being able to answer "why not just click around the Azure
-Portal?" clearly, because that's the real interview question underneath "why IaC":
+Before getting into Terraform's mechanics, it's worth being able to answer "why not just click
+around the Azure Portal?" clearly — because that's the real interview question underneath "why IaC."
 
 - **Reproducibility.** A consulting engagement needs the same App Service + Key Vault + networking
   shape recreated for dev, staging, and prod — and again for the next client. Clicking through a
-  portal three times introduces drift by definition; a `.tf` file applied three times with different
-  variables produces identical infrastructure. This is literally how the same module stood up
-  separate, isolated App Service environments for HSBC and Bank of America (see `00-README.md`) —
-  one module, two sets of variables, zero drift between them.
-- **Review and audit trail.** Infrastructure changes go through the same pull-request review as code
-  changes when they're expressed as text in Git. "Who opened port 22 to the internet and when" is a
-  `git log` and PR-diff question instead of an Azure Activity Log archaeology exercise.
-- **Disaster recovery.** If an environment is deleted or corrupted, `terraform apply` against the
-  existing state and config rebuilds it, instead of a human trying to remember the twelve settings
+  portal three times introduces drift by definition. A `.tf` file applied three times with different
+  variables produces identical infrastructure every time. This is literally how the same module
+  stood up separate, isolated App Service environments for HSBC and Bank of America (see
+  `00-README.md`) — one module, two sets of variables, zero drift between them.
+- **Review and audit trail.** When infrastructure changes are expressed as text in Git, they go
+  through the same pull-request review as code changes. "Who opened port 22 to the internet, and
+  when?" becomes a `git log` and PR-diff question, instead of an Azure Activity Log archaeology
+  exercise.
+- **Disaster recovery.** If an environment gets deleted or corrupted, `terraform apply` against the
+  existing state and config rebuilds it — instead of a human trying to remember the twelve settings
   that made the original App Service work.
 - **Consistency between environments.** Because dev/staging/prod are the same Terraform module
   invoked with different variables, "it worked in staging but not prod" is far less likely to be
@@ -33,8 +35,8 @@ Portal?" clearly, because that's the real interview question underneath "why IaC
 
 ## Core Concepts: Providers, Resources, State
 
-**Providers** are plugins that let Terraform talk to a specific platform's API — `azurerm` for Azure,
-`aws` for AWS, and so on. A provider block configures which platform (and often which
+**Providers** are plugins that let Terraform talk to a specific platform's API — `azurerm` for
+Azure, `aws` for AWS, and so on. A provider block configures which platform (and often which
 subscription/region) subsequent resources target.
 
 ```hcl
@@ -54,7 +56,7 @@ provider "azurerm" {
 ```
 
 **Resources** are the individual infrastructure objects you want to exist — an App Service Plan, a
-Web App, a Key Vault, a storage account. Each resource block declares its *desired* configuration;
+Web App, a Key Vault, a storage account. Each resource block declares its *desired* configuration.
 Terraform's job is to figure out what API calls are needed to make reality match that declaration.
 
 ```hcl
@@ -67,19 +69,21 @@ resource "azurerm_service_plan" "uploader_plan" {
 }
 ```
 
-**State** is Terraform's record of what it believes actually exists — a JSON file (`terraform.tfstate`)
-mapping each resource block in your config to the real object it created, along with all the
-attributes that object currently has. State is what makes Terraform *declarative* rather than
-*imperative*: you never write "create a web app," you write "a web app with these properties should
-exist," and Terraform diffs that desired state against its recorded state to compute the minimal set
-of changes.
+**State** is Terraform's record of what it believes actually exists. It's a JSON file
+(`terraform.tfstate`) that maps each resource block in your config to the real object it created,
+along with every attribute that object currently has.
 
-Critically, state should never be a local file in a consulting context — it must live in **remote,
-shared, locked storage** (an Azure Storage Account container is the standard choice) so that:
+State is what makes Terraform *declarative* rather than *imperative*. You never write "create a web
+app" — you write "a web app with these properties should exist," and Terraform diffs that desired
+state against its recorded state to compute the minimal set of changes.
 
-1. Every teammate and every pipeline run operates against the same source of truth for "what exists."
+Critically, state should never be a local file in a consulting context. It must live in **remote,
+shared, locked storage** — an Azure Storage Account container is the standard choice — so that:
+
+1. Every teammate and every pipeline run operates against the same source of truth for "what
+   exists."
 2. **State locking** prevents two concurrent `terraform apply` runs from racing each other and
-   corrupting the state file or double-provisioning resources — Terraform acquires a lock on the
+   corrupting the state file or double-provisioning resources. Terraform acquires a lock on the
    remote backend before any write, and a second concurrent run simply fails fast with a "state is
    locked" error instead of proceeding.
 
@@ -97,25 +101,36 @@ terraform {
 ## Plan and Apply: The Two-Phase Workflow
 
 Terraform's core workflow is deliberately two-phase, and understanding why is a common interview
-probe:
+probe.
+
+```mermaid
+flowchart LR
+    CFG[Desired config\n.tf files] --> PLAN["terraform plan\ncomputes diff, changes NOTHING"]
+    STATE[Current state\nterraform.tfstate] --> PLAN
+    PLAN --> DIFF["Diff: N to add, M to change, K to destroy"]
+    DIFF --> REVIEW{Human / policy review}
+    REVIEW -->|approved| APPLY["terraform apply\ncalls provider API, updates state"]
+    REVIEW -->|rejected| STOP[Nothing changes]
+```
 
 - **`terraform plan`** computes and displays the diff between desired config and current state
-  *without changing anything* — "this apply would add 2 resources, change 1, destroy 0." This is the
-  step that belongs in a pipeline *before* any approval gate, so a human (or an automated policy
-  check) can review exactly what's about to change to real infrastructure before it happens.
-- **`terraform apply`** executes the plan, calling the provider's API to create/update/destroy
-  resources and updating state to match.
+  *without changing anything* — "this apply would add 2 resources, change 1, destroy 0." This step
+  belongs in a pipeline *before* any approval gate, so a human (or an automated policy check) can
+  review exactly what's about to change to real infrastructure before it happens.
+- **`terraform apply`** executes the plan: it calls the provider's API to create/update/destroy
+  resources, and updates state to match.
 
-In a CI/CD pipeline, `plan` typically runs on every PR (so reviewers see the infrastructure diff
-alongside the code diff) and `apply` runs after merge and after an approval gate — mirroring the
-build-then-gated-deploy pattern from chapter 02, just for infrastructure instead of application code.
+In a CI/CD pipeline, `plan` typically runs on every PR, so reviewers see the infrastructure diff
+alongside the code diff. `apply` runs after merge and after an approval gate — mirroring the
+build-then-gated-deploy pattern from chapter 02, just for infrastructure instead of application
+code.
 
 ## Modules: Reusing Infrastructure Patterns
 
 A **module** is a reusable, parameterized bundle of resources — the Terraform equivalent of the
 pipeline templates from chapter 02. Instead of writing the App Service + Key Vault + networking
-pattern from scratch for every client and every environment, you write it once as a module and invoke
-it with different variables:
+pattern from scratch for every client and every environment, you write it once as a module and
+invoke it with different variables:
 
 ```hcl
 module "uploader_service_infra" {
@@ -138,14 +153,14 @@ module "chatbot_service_infra" {
 ```
 
 This is the realistic way a shared "App Service + Key Vault" pattern would be reused across the
-chatbot and document-uploader services in this curriculum — one module, invoked twice with different
-sizing.
+chatbot and document-uploader services in this curriculum — one module, invoked twice with
+different sizing.
 
 ## Worked Example: Azure App Service + Key Vault
 
-A minimal but complete example provisioning the infrastructure shape both services need — a Linux App
+A minimal but complete example provisioning the infrastructure shape both services need: a Linux App
 Service running a container, and a Key Vault holding its secrets, with the App Service granted
-access via a managed identity (no credentials in app settings):
+access via a managed identity — no credentials stored in app settings.
 
 ```hcl
 resource "azurerm_resource_group" "rg" {
@@ -203,7 +218,7 @@ resource "azurerm_key_vault_access_policy" "app_access" {
 Running `terraform plan` against this config for a brand-new environment would report something like
 "5 to add, 0 to change, 0 to destroy" — App Service Plan, Web App, Key Vault, access policy, and the
 implicit resource group dependency. That plan-output shape (add/change/destroy counts) is exactly
-what notebook `02_terraform_basics_demo.ipynb` parses programmatically, because reading a plan summary
+what notebook `02_terraform_basics_demo.ipynb` parses programmatically. Reading a plan summary
 correctly — not just running `apply` and hoping — is the actual skill being tested when someone asks
 "walk me through how you'd review a Terraform plan before approving it."
 
@@ -212,5 +227,5 @@ correctly — not just running `apply` and hoping — is the actual skill being 
 If asked "why Terraform and not ARM templates / Bicep," a fair answer for a multi-client consultancy
 is: Terraform is cloud-agnostic (useful if any engagement touches AWS/GCP too), has a larger module
 ecosystem, and its state-plus-plan model gives an explicit, reviewable diff step that fits naturally
-into a PR-gated pipeline — while acknowledging Bicep is a perfectly reasonable Azure-only alternative
-with tighter native integration.
+into a PR-gated pipeline. It's worth acknowledging, though, that Bicep is a perfectly reasonable
+Azure-only alternative with tighter native integration.

@@ -7,71 +7,89 @@
 > project tracking & summarization, RAG-enabled Cost catalog generation system, Entity-extraction-based
 > Project demand capture & multiple Recommender Systems."*
 
-## If you have an interview coming up: read Chapter 8 first
+## If you have an interview coming up, read Chapter 8 first
 
-This course is the strongest direct analog in the whole curriculum to course 5's "how do you handle
-revised versions of a document" chapter — same underlying failure mode, one layer down the stack.
-Course 5 asks whether the document store knows which upload is current; **Chapter 8
-(`08-vector-index-staleness-and-document-revision-handling.md`)** asks the same question about
-Pinecone: when a project's status, a cost-catalog entry, or a document changes at the source, how do
-you keep the RAG pipeline from retrieving and confidently answering from the old, stale vector? Q1 in
-`99-Interview-QA.md` is the compressed, interview-ready version of that same answer. Chapter 9
-(`09-production-resilience-and-operational-engineering.md`) is this course's counterpart to course 5's
-production-resilience chapter — the real-shaped error-handling table, scaling caveats, bug stories, and
-timeout values for a RAG/LangGraph platform.
+This course has the strongest direct link in the whole curriculum to course 5's "how do you handle
+revised versions of a document" chapter. It's the same underlying failure, just one layer down the
+stack.
+
+- Course 5 asks: does the document store know which upload is the current one?
+- **Chapter 8** (`08-vector-index-staleness-and-document-revision-handling.md`) asks the same question
+  about Pinecone: when a project's status, a cost-catalog entry, or a document changes at the source,
+  how do you stop the RAG pipeline from retrieving the old, stale vector and confidently answering from
+  it?
+
+Q1 in `99-Interview-QA.md` is the short, interview-ready version of that same answer.
+
+Chapter 9 (`09-production-resilience-and-operational-engineering.md`) is this course's version of
+course 5's production-resilience chapter: a realistic error-handling table, scaling caveats, bug
+stories, and timeout values, all specific to a RAG/LangGraph platform.
 
 ## Business Context
 
-Indegene is a digital-first life sciences commercialization company — it runs the operational
-machinery (content production, regulatory submissions, medical affairs, commercial campaigns) that
-lets pharma and biotech clients get products to market and keep them compliant once they're there.
-A huge share of that work happens through **projects**: a client requests a piece of localized
-promotional content, a regulatory document package, a training deck, or a campaign asset, and an
-Indegene delivery team creates, revises, and localizes it against a cost catalog and a set of
-process rules.
+Indegene is a digital-first life sciences commercialization company. It runs the operational machinery
+— content production, regulatory submissions, medical affairs, commercial campaigns — that lets pharma
+and biotech clients get products to market and stay compliant once they're there.
 
-Historically, a client "liaison" — a person — fielded requests like *"what's the status of the Japan
-localization for Project X"*, *"how much would a French + German localization of this asset cost"*,
-or *"I need a new promotional deck for this molecule, similar to what we did last quarter"*. Those
-questions are repetitive, span structured data (cost catalogs, project metadata) and unstructured
-data (project notes, prior deliverables), and clients increasingly want to ask them in their own
-language, by voice or by chat, at any hour. That's the problem the **Virtual Liaison platform**
-solves: an internal, GPT-powered assistant that stands in for the human liaison for the
-long tail of routine project questions, freeing the human liaison for judgment calls and
-relationship work.
+A huge share of that work happens through **projects**. A client requests a piece of localized
+promotional content, a regulatory document package, a training deck, or a campaign asset. An Indegene
+delivery team then creates, revises, and localizes it against a cost catalog and a set of process
+rules.
+
+Historically, a client "liaison" — a real person — fielded questions like:
+
+- "What's the status of the Japan localization for Project X?"
+- "How much would a French + German localization of this asset cost?"
+- "I need a new promotional deck for this molecule, similar to what we did last quarter."
+
+These questions share a few traits: they're repetitive, they span both structured data (cost catalogs,
+project metadata) and unstructured data (project notes, prior deliverables), and clients increasingly
+want to ask them in their own language, by voice or by chat, at any hour.
+
+That's the problem the **Virtual Liaison platform** solves. It's an internal, GPT-powered assistant
+that stands in for the human liaison on the long tail of routine project questions — freeing the human
+liaison to focus on judgment calls and relationship work.
 
 ## Client & Production Deployment
 
-This platform ran in **production, customer-facing** at Indegene for two real pharma clients, **Eli
-Lilly** and **AstraZeneca** — a live chat/voice interface that real client-side project teams used
-daily to check project status, get cost estimates, and log new requests, not an internal demo or
-proof-of-concept. Because it's a real-time conversational surface (chat and, notably, voice), latency
-budgets mattered here more than in almost any other project on the resume: a RAG-retrieval-plus-
-generation round trip that's tolerable in an async ticketing system reads as a broken, unresponsive
-assistant on a live voice call.
+This platform ran in **production, customer-facing**, at Indegene, for two real pharma clients:
+**Eli Lilly** and **AstraZeneca**. It was a live chat/voice interface that real client-side project
+teams used daily — to check project status, get cost estimates, and log new requests. This was not an
+internal demo or a proof-of-concept.
 
-The orchestration layer (Chapter 7's LangGraph graph) ran as containerized services on **AWS ECS
-(Fargate)** behind an **ALB**, calling out to **Pinecone** (namespaced per client — see Chapter 2) for
-retrieval and to **Sagemaker** or **Bedrock**-hosted models for inference where self-hosted, with
-**Lambda + API Gateway** handling lightweight webhook/event endpoints such as voice-callback handling,
-**S3** (per-client prefixes) feeding the RAG pipelines with source documents, **CloudWatch** for
-end-to-end observability, and **Secrets Manager** for API keys and credentials.
+Because it's a real-time conversational surface (chat, and notably, voice), latency mattered here more
+than in almost any other project on the resume. A RAG-retrieval-plus-generation round trip that feels
+fine in an async ticketing system reads as a broken, unresponsive assistant on a live voice call.
 
-Because Eli Lilly and AstraZeneca are competing pharma companies served by the **same** orchestration
-platform, this is the most multi-tenant-sensitive project in the curriculum: their project data, cost
-catalogs, and conversation history must be strictly isolated — separate Pinecone namespaces per
-client, separate S3 prefixes, IAM scoping, and per-client conversation memory that never crosses over
-— even though one shared codebase and one shared set of ECS services handle both clients' traffic.
-Chapter 2 covers the Pinecone-namespace side of this in depth; Chapter 7 covers why ECS Fargate
+Here's how it was deployed:
+
+- The orchestration layer (Chapter 7's LangGraph graph) ran as containerized services on **AWS ECS
+  (Fargate)**, behind an **ALB**.
+- It called out to **Pinecone** (namespaced per client — see Chapter 2) for retrieval.
+- It called **Sagemaker**- or **Bedrock**-hosted models for inference where self-hosted.
+- **Lambda + API Gateway** handled lightweight webhook/event endpoints, such as voice-callback
+  handling.
+- **S3** (with per-client prefixes) fed source documents into the RAG pipelines.
+- **CloudWatch** provided end-to-end observability.
+- **Secrets Manager** held API keys and credentials.
+
+Eli Lilly and AstraZeneca are competing pharma companies, and they were served by the **same**
+orchestration platform. That makes this the most multi-tenant-sensitive project in the curriculum:
+their project data, cost catalogs, and conversation history had to be strictly isolated from each
+other — separate Pinecone namespaces per client, separate S3 prefixes, IAM scoping, and per-client
+conversation memory that never crosses over — even though one shared codebase and one shared set of
+ECS services handled both clients' traffic.
+
+Chapter 2 covers the Pinecone-namespace side of this in depth. Chapter 7 explains why ECS Fargate
 (rather than pure Lambda) is the right home for this kind of stateful, latency-sensitive orchestration.
 
 ## Candidate's Likely Role & Architecture
 
 As the Data Scientist building this platform, the candidate's role spanned the full GenAI
-orchestration layer — not training a foundation model, but composing one (GPT-class, via an LLM
-API) with retrieval, memory, and task-specific sub-systems into a single conversational product.
-Reading the resume bullet closely, this project is really **five features wearing one chat/voice
-UI**:
+orchestration layer. That means not training a foundation model, but *composing* one (GPT-class, via
+an LLM API) with retrieval, memory, and task-specific sub-systems into a single conversational product.
+
+Read closely, the resume bullet describes **five features wearing one chat/voice UI**:
 
 1. **RAG-enabled project data retrieval** (LangChain + Pinecone) — answer "what's the status of
    Project X" by retrieving the right project's data, not by hoping the LLM already knows it.
@@ -86,10 +104,10 @@ UI**:
 5. **Multiple recommender systems** — suggest similar past projects, relevant cost-catalog items, or
    likely-next-steps based on what's being discussed.
 
-All five sit behind one chat/voice front end with multilingual input, which means an early routing
-decision — "is this request status/RAG, cost/RAG, summarization, new-demand-capture, or a
-recommendation ask?" — has to happen before any of the five sub-systems fire. That routing problem is
-exactly what Chapter 7 (LangGraph) formalizes.
+All five sit behind one chat/voice front end with multilingual input. That means an early routing
+decision has to happen before any of the five sub-systems fire: "is this request status/RAG, cost/RAG,
+summarization, new-demand-capture, or a recommendation ask?" That routing problem is exactly what
+Chapter 7 (LangGraph) formalizes.
 
 > The production deployment facts above (Eli Lilly, AstraZeneca, AWS ECS Fargate, Pinecone,
 > per-client isolation) are real, per the root `README.md`'s "Client & Production Context" section.
@@ -104,8 +122,8 @@ exactly what Chapter 7 (LangGraph) formalizes.
 
 ### Logical / Feature Architecture
 
-The diagram below shows how a single client message gets routed to the right sub-system — this is the
-"what" (Chapters 1–7 each build one box). The **Production Deployment Architecture** further down
+The diagram below shows how a single client message gets routed to the right sub-system. This is the
+"what" — Chapters 1–7 each build one box. The **Production Deployment Architecture** further down
 shows the "where it runs" (the AWS topology from the section above).
 
 ```mermaid
@@ -152,8 +170,8 @@ Client (chat/voice, any language)
 
 ### Production Deployment Architecture (AWS)
 
-This is the "where it runs" view — the AWS topology behind the logical diagram above, deployed for
-both Eli Lilly and AstraZeneca on one shared platform with per-client isolation enforced at the
+This is the "where it runs" view — the AWS topology behind the logical diagram above. It was deployed
+for both Eli Lilly and AstraZeneca on one shared platform, with per-client isolation enforced at the
 Pinecone-namespace and IAM layer.
 
 ```mermaid
@@ -187,21 +205,21 @@ flowchart TB
 Key production points worth being able to explain, not just diagram:
 
 - **ALB -> ECS Fargate** runs the LangGraph orchestration layer as a long-running containerized
-  service rather than a chain of Lambda invocations, because a multi-turn voice/chat session needs
-  persistent, low-latency state across turns (Chapter 7 goes deep on why Fargate fits this better
-  than pure serverless here).
-- **Pinecone namespace per client** (`eli-lilly` vs. `astrazeneca`) is the hard isolation boundary —
-  the same ECS service serves both clients, but the namespace used for any given request is derived
-  server-side from the authenticated session, never from client input (Chapter 2).
-- **S3 prefixes per client** and **IAM scoping** extend that same isolation to document storage: the
+  service, rather than a chain of Lambda invocations. Why? A multi-turn voice/chat session needs
+  persistent, low-latency state across turns. (Chapter 7 goes deep on why Fargate fits this better
+  than pure serverless here.)
+- **Pinecone namespace per client** (`eli-lilly` vs. `astrazeneca`) is the hard isolation boundary.
+  The same ECS service serves both clients, but the namespace used for any given request is always
+  derived server-side from the authenticated session — never from client input (Chapter 2).
+- **S3 prefixes per client** and **IAM scoping** extend that same isolation to document storage. The
   RAG pipeline's source documents for Eli Lilly are never in a location AstraZeneca's IAM role can
   read, and vice versa.
-- **Lambda + API Gateway** sit alongside ECS for lightweight, event-driven endpoints — the canonical
-  example here is a voice-callback webhook, which doesn't need the always-on orchestration service and
-  is a better fit for a short-lived, event-triggered Lambda invocation.
-- **CloudWatch** aggregates logs/metrics across ECS, Lambda, and the model-inference tier, which is
-  what makes per-client latency and error-rate monitoring possible in production rather than only in
-  a notebook.
+- **Lambda + API Gateway** sit alongside ECS for lightweight, event-driven endpoints. The canonical
+  example is a voice-callback webhook — it doesn't need the always-on orchestration service, and is a
+  better fit for a short-lived, event-triggered Lambda invocation.
+- **CloudWatch** aggregates logs and metrics across ECS, Lambda, and the model-inference tier. That's
+  what makes per-client latency and error-rate monitoring possible in production, not just in a
+  notebook.
 
 ## How This Course Is Organized
 
@@ -219,10 +237,12 @@ Key production points worth being able to explain, not just diagram:
 | `99-Interview-QA.md` | 20+ behavioral, technical deep-dive, system-design, and client/production-deployment interview Q&A — **Q1 is the vector-staleness gotcha question**, ahead of the general behavioral warm-up |
 | `notebooks/` | Eight runnable, offline notebooks — one RAG-from-scratch, one Pinecone-shaped demo, one hybrid search, one summarization, one NER, one recommender, one version-aware upsert/retire demo, and one namespace-isolation resilience test |
 
-Read in order: `01` through `07` build on each other (RAG → vector DB → hybrid search → summarization
-→ extraction → recommenders → the LangGraph layer that ties all five together); `08` and `09` extend
-the course with the same production-hardening depth course 5 has (vector-index staleness/versioning,
-then operational resilience), and each chapter's matching notebook is meant to be run alongside it.
+Read `01` through `07` in order — they build on each other: RAG → vector DB → hybrid search →
+summarization → extraction → recommenders → the LangGraph layer that ties all five together.
+
+`08` and `09` extend the course with the same production-hardening depth course 5 has: first
+vector-index staleness/versioning, then operational resilience. Each chapter's matching notebook is
+meant to be run alongside it.
 
 ## STAR Summary (practice this out loud, under 90 seconds)
 
@@ -241,7 +261,7 @@ directly, in their preferred language, to get grounded answers about project sta
 costs, and to log new project requests — without waiting on a human liaison for routine asks.
 
 **Action.** I designed a RAG pipeline using LangChain and Pinecone to ground project-status answers
-in each client's actual project data, kept per-client/per-project data isolated using Pinecone
+in each client's actual project data, and kept per-client/per-project data isolated using Pinecone
 namespaces and metadata filters. I added a summarization chain so clients could ask for a concise,
 current summary of a project's history instead of reading raw logs. For cost questions, I built a
 second RAG pipeline over a structured cost catalog, combining keyword and embedding search (hybrid

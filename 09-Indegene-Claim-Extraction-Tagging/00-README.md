@@ -11,43 +11,63 @@ perform health checks, Lambda, and API gateway for model deployment."
 
 ## Client & Production Deployment
 
-This platform is not a demo or proof-of-concept — it's a **production, customer-facing compliance-review
-system** that served two named pharma clients, **Eli Lilly** and **AstraZeneca**, processing real
-marketing/medical content review volume daily. Both clients' claims content, model artifacts, and
-retraining pipelines are kept isolated from each other (separate S3 prefixes/buckets, separate or
-namespaced Sagemaker endpoints, separate IAM roles) — a claim flagged for Eli Lilly's content must never
-be visible to an AstraZeneca reviewer, and vice versa. Because the content under review is real regulated
-pharma marketing material for two active clients, both failure modes carry real stakes: a **false
-negative** (missing a non-compliant claim) is a genuine legal/patient-safety risk, and **pipeline
-downtime** blocks a client's content-review workflow against a real publication deadline — this isn't a
-hypothetical framing exercise, it shaped threshold choices, monitoring, and the production architecture
-described below.
+This is not a demo. It is not a proof-of-concept. It's a **production, customer-facing
+compliance-review system**.
+
+It served two named pharma clients: **Eli Lilly** and **AstraZeneca**. Both are confirmed real
+clients. The system processed real marketing/medical content review volume for them daily.
+
+Both clients' data is kept strictly separate:
+
+- Claims content, model artifacts, and retraining pipelines are isolated per client.
+- Separate S3 prefixes/buckets.
+- Separate or namespaced Sagemaker endpoints.
+- Separate IAM roles.
+
+A claim flagged for Eli Lilly's content must never be visible to an AstraZeneca reviewer, and
+vice versa.
+
+Why does this isolation matter so much? Because the content under review is real, regulated pharma
+marketing material for two active clients. That means both failure modes carry real stakes:
+
+- A **false negative** (the system misses a non-compliant claim) is a genuine legal and
+  patient-safety risk.
+- **Pipeline downtime** blocks a client's content-review workflow against a real publication
+  deadline.
+
+This isn't a hypothetical framing exercise. It shaped the threshold choices, the monitoring, and
+the production architecture described below.
 
 ## 1. The business problem
 
 Pharma marketing content — sales-rep decks, banner ads, physician-facing leave-behinds, websites —
-is one of the most heavily regulated categories of content in existence. Every factual assertion in
-it (a **claim**, e.g. *"Drug X reduces symptom Y by 42% vs. placebo"*) must be traceable back to an
-**approved source document** (a clinical study, an FDA-approved label, a peer-reviewed paper).
+is one of the most heavily regulated categories of content that exists.
+
+Every factual assertion in that content is called a **claim**. For example: *"Drug X reduces
+symptom Y by 42% vs. placebo."* Every claim must be traceable back to an **approved source
+document** — a clinical study, an FDA-approved label, a peer-reviewed paper.
+
 Regulatory and medical-legal review (often shortened to "med-legal review" or "MLR") exists purely
-to catch claims that are unsupported, overstated, or missing their required companion disclosures
-before the content goes out the door — a compliance failure here is not a bug, it's a legal and
-patient-safety risk.
+to catch problems before content goes out the door: claims that are unsupported, overstated, or
+missing their required companion disclosures. A compliance failure here is not a bug. It's a legal
+and patient-safety risk.
 
 Two disclosure rules make this concrete:
 
-- **Every claim needs a source.** If a claim can't be matched to language in an approved reference,
-  it gets flagged.
+- **Every claim needs a source.** If a claim can't be matched to language in an approved
+  reference, it gets flagged.
 - **Every promotional piece needs Important Safety Information (ISI).** ISI is the mandatory
-  "risks, contraindications, side effects" section that has to appear alongside (or very near) the
-  promotional claims. A missing or truncated ISI section is an automatic compliance failure,
+  "risks, contraindications, side effects" section. It has to appear alongside (or very near) the
+  promotional claims. A missing or truncated ISI section is an automatic compliance failure —
   regardless of how accurate the claims themselves are.
 
-Doing this review manually — a human medical reviewer reading every asset line-by-line against a
-library of approved source documents — is slow and doesn't scale with how much content pharma
-marketing teams produce. The project on this resume bullet is about building the **NLP tooling that
-makes that first pass automatic**, so human reviewers spend their time adjudicating genuinely
-ambiguous or flagged content instead of re-reading content that's obviously fine.
+Doing this review manually doesn't scale. A human medical reviewer reading every asset
+line-by-line against a library of approved source documents is slow, and pharma marketing teams
+produce a lot of content.
+
+The project on this resume bullet is about building the **NLP tooling that makes that first pass
+automatic**. The goal: human reviewers spend their time adjudicating genuinely ambiguous or
+flagged content, instead of re-reading content that's obviously fine.
 
 ## 2. What was built (four modules)
 
@@ -60,138 +80,82 @@ ambiguous or flagged content instead of re-reading content that's obviously fine
 
 ## 3. System architecture — content review pipeline
 
-```
-  Eli Lilly reviewer app          AstraZeneca reviewer app
-          │                                │
-          └───────────────┬────────────────┘
-                            ▼
-                 ┌────────────────────┐
-                 │        ALB          │   TLS termination, routes by
-                 │ (Application Load   │   client-scoped auth context
-                 │  Balancer)          │
-                 └─────────┬──────────┘
-                            ▼
-                 ┌────────────────────┐
-                 │   ECS (Fargate)     │   API / orchestration layer —
-                 │   API service       │   tags every request with its
-                 │  (per-client auth   │   client_id (Lilly | AstraZeneca)
-                 │   context)          │   before it enters the pipeline
-                 └─────────┬──────────┘
-                            │
-  Marketing doc             ▼
-  (PDF/HTML/PPT) ┌────────────────────┐
-  ───────────────▶   Text ingestion   │
-                 │   & sentence       │
-                 │   segmentation     │
-                 └─────────┬──────────┘
-                            │
-                            ▼
-                 ┌────────────────────┐
-                 │  Claim Extraction  │   candidate claim sentences
-                 │  model (BERT-based)│───────────────┐
-                 └─────────┬──────────┘               │
-                            │                           │
-                            ▼                           ▼
-                 ┌────────────────────┐      ┌────────────────────┐
-                 │ Claim Classification│      │  ISI Presence /    │
-                 │ (multi-label tags:  │      │  Completeness      │
-                 │ efficacy/safety/…)  │      │  Classifier        │
-                 └─────────┬──────────┘      └─────────┬──────────┘
-                            │                           │
-                            ▼                           │
-                 ┌────────────────────┐                │
-                 │ Content Comparator │                │
-                 │ (vs. approved      │                │
-                 │  source library,   │                │
-                 │  client-scoped S3  │                │
-                 │  prefix)           │                │
-                 └─────────┬──────────┘                │
-                            │                           │
-                            └─────────────┬─────────────┘
-                                          ▼
-                              ┌────────────────────────┐
-                              │  Flagged-for-review     │
-                              │  queue (human-in-loop   │
-                              │  medical/legal reviewer,│
-                              │  scoped to the request's │
-                              │  client_id — a Lilly     │
-                              │  reviewer never sees an  │
-                              │  AstraZeneca queue item) │
-                              └────────────────────────┘
+```mermaid
+flowchart TB
+    LILLY["Eli Lilly reviewer app"] --> ALB
+    ASTRA["AstraZeneca reviewer app"] --> ALB
+    ALB["ALB (Application Load Balancer)<br/>TLS termination, routes by<br/>client-scoped auth context"] --> ECS
+    DOC["Marketing doc<br/>(PDF / HTML / PPT)"] --> ING
+    ECS["ECS (Fargate) API service<br/>per-client auth context —<br/>tags every request with its<br/>client_id (Lilly | AstraZeneca)<br/>before it enters the pipeline"] --> ING["Text ingestion &<br/>sentence segmentation"]
+    ING --> CE["Claim Extraction model<br/>(BERT-based)<br/>→ candidate claim sentences"]
+    CE --> CC["Claim Classification<br/>multi-label tags:<br/>efficacy / safety / …"]
+    CE --> ISI["ISI Presence /<br/>Completeness<br/>Classifier"]
+    CC --> COMP["Content Comparator<br/>vs. approved source library,<br/>client-scoped S3 prefix"]
+    COMP --> Q["Flagged-for-review queue<br/>(human-in-loop medical/legal<br/>reviewer, scoped to the request's<br/>client_id — a Lilly reviewer<br/>never sees an AstraZeneca<br/>queue item)"]
+    ISI --> Q
 ```
 
-Every stage produces a *signal*, not a verdict — the model layer's job is to triage, not to
-auto-approve. Anything low-confidence, unmatched to an approved source, or missing ISI lands in a
-queue for a human reviewer. This is the standard pattern for regulated-content ML: automate the
-"this is obviously fine" 80%, concentrate expert attention on the ambiguous 20%.
+Every stage produces a *signal*, not a verdict. The model layer's job is to triage, not to
+auto-approve.
 
-Both content and identity are client-scoped end to end: the ECS Fargate API layer stamps every request
-with the requesting client's `client_id` at the door, content and approved-source-library lookups read
-from that client's S3 prefix only, and the review queue filters strictly on `client_id` — there is no
-code path where an Eli Lilly claim can land in an AstraZeneca reviewer's queue or vice versa.
+Anything that is low-confidence, unmatched to an approved source, or missing ISI lands in a queue
+for a human reviewer. This is the standard pattern for regulated-content ML: automate the "this is
+obviously fine" 80%, and concentrate expert attention on the ambiguous 20%.
+
+Both content and identity are client-scoped end to end:
+
+- The ECS Fargate API layer stamps every request with the requesting client's `client_id` at the
+  door.
+- Content and approved-source-library lookups read from that client's S3 prefix only.
+- The review queue filters strictly on `client_id`.
+
+There is no code path where an Eli Lilly claim can land in an AstraZeneca reviewer's queue, or
+vice versa.
 
 ## 4. MLOps architecture — retraining & deployment
 
-```
- Eli Lilly retraining trigger        AstraZeneca retraining trigger
- (scheduled / drift / perf)          (scheduled / drift / perf,
-      │                               runs independently)
-      ▼                                    ▼
- ┌──────────────────────┐          ┌──────────────────────┐
- │  AWS Sagemaker         │          │  AWS Sagemaker         │
- │  fine-tuning job        │          │  fine-tuning job        │
- │  (Lilly IAM role,       │          │  (AstraZeneca IAM role,  │
- │  Lilly training data)   │          │  AstraZeneca training   │
- │                          │          │  data)                  │
- └──────────┬─────────────┘          └──────────┬─────────────┘
-            ▼                                    ▼
- ┌──────────────────────────────────────────────────────────┐
- │  S3 artifact store — client-isolated prefixes/buckets      │
- │  s3://claims-eli-lilly/model-artifacts/claim-classifier/…  │
- │  s3://claims-astrazeneca/model-artifacts/claim-classifier/…│
- │  (model weights, tokenizer config, training metadata,       │
- │  versioned per client, never shared)                        │
- └──────────────────────────────┬───────────────────────────┘
-                                  ▼
- ┌─────────────────┐     ┌──────────────────────┐     ┌────────────────────────┐
- │ EventBridge      │     │  Lambda + API Gateway │     │  Sagemaker multi-model  │
- │ Scheduler        │────▶│  (request routing,    │◀────│  endpoints — namespaced │
- │ (periodic health  │     │  client_id-aware,     │     │  per client:            │
- │ checks on live    │     │  auth via Secrets     │     │  lilly-claims-mme,      │
- │ endpoints, both    │     │  Manager)              │     │  astrazeneca-claims-mme │
- │ clients)            │     │                        │     │  each with its own      │
- └─────────────────┘     └──────────────────────┘     │  auto-scaling policy    │
-                                                          └────────────────────────┘
-                                                                    ▲
-                                                        CloudWatch metrics
-                                                        (latency, invocations,
-                                                        errors — tagged per
-                                                        client) drive scaling
-                                                        and alerting
-                                                                    ▲
-                          ECS (Fargate) API/orchestration layer, behind an ALB,
-                          is the client-facing entry point that ultimately
-                          triggers these Lambda-routed Sagemaker calls (see the
-                          content-review pipeline diagram above)
+```mermaid
+flowchart TB
+    subgraph Lilly["Eli Lilly pipeline"]
+        T1["Retraining trigger<br/>(scheduled / drift / perf)"] --> SM1["AWS Sagemaker<br/>fine-tuning job<br/>(Lilly IAM role,<br/>Lilly training data)"]
+    end
+    subgraph Astra["AstraZeneca pipeline (runs independently)"]
+        T2["Retraining trigger<br/>(scheduled / drift / perf)"] --> SM2["AWS Sagemaker<br/>fine-tuning job<br/>(AstraZeneca IAM role,<br/>AstraZeneca training data)"]
+    end
+    SM1 --> S3
+    SM2 --> S3["S3 artifact store — client-isolated prefixes/buckets<br/>s3://claims-eli-lilly/model-artifacts/claim-classifier/…<br/>s3://claims-astrazeneca/model-artifacts/claim-classifier/…<br/>(model weights, tokenizer config, training metadata,<br/>versioned per client, never shared)"]
+    S3 --> LAMBDA["Lambda + API Gateway<br/>request routing, client_id-aware,<br/>auth via Secrets Manager"]
+    EB["EventBridge Scheduler<br/>periodic health checks on live<br/>endpoints, both clients"] --> LAMBDA
+    LAMBDA --> MME["Sagemaker multi-model endpoints —<br/>namespaced per client:<br/>lilly-claims-mme,<br/>astrazeneca-claims-mme,<br/>each with its own auto-scaling policy"]
+    MME --> CW["CloudWatch metrics<br/>(latency, invocations, errors —<br/>tagged per client) drive<br/>scaling and alerting"]
+    CW -.-> MME
+    ECSAPI["ECS (Fargate) API/orchestration layer,<br/>behind an ALB — the client-facing<br/>entry point (see pipeline diagram above)"] --> LAMBDA
 ```
 
-The MLOps half of this bullet is really the more transferable interview material: it's a generic
-"how do you keep an NLP model fresh and cheap to serve in production" pattern, which happens to be
-implemented here with the AWS-native toolchain (ECS Fargate, Sagemaker, S3, EventBridge, Lambda, API
-Gateway, Secrets Manager, CloudWatch). The client-isolation details above (separate S3 prefixes/buckets,
-separate IAM roles, namespaced Sagemaker endpoints) aren't incidental — for a compliance platform serving
-two competing pharma companies, that isolation is a hard production requirement, not an optimization.
+The MLOps half of this bullet is really the more transferable interview material. Strip away the
+AWS product names, and it's a generic pattern: "how do you keep an NLP model fresh and cheap to
+serve in production." It happens to be implemented here with the AWS-native toolchain — ECS
+Fargate, Sagemaker, S3, EventBridge, Lambda, API Gateway, Secrets Manager, CloudWatch.
+
+The client-isolation details above aren't incidental — separate S3 prefixes/buckets, separate IAM
+roles, namespaced Sagemaker endpoints. For a compliance platform serving two competing pharma
+companies, that isolation is a hard production requirement, not an optimization.
 
 ## 4a. Two gotchas worth reading before an interview
 
-Two chapters go a level deeper than the rest of this course on questions an interviewer who understands
-this domain is likely to ask. **Chapter 07** answers "when the approved-claims library gets revised, how
-do you stop the Content Comparator from matching against a claim that's since been withdrawn?" — the
-analog, in this project, of the document-versioning gotcha in the Capco Document Uploader course.
-**Chapter 08** covers the production-resilience side: a realistic error-handling table for the claims
-pipeline, a Sagemaker/Lambda model-version caching caveat, four concrete NLP-pipeline bug stories, and one
-candidly-named hardening gap. Read these two first if you have an interview coming up before you have
-time for the rest of the course.
+Two chapters go a level deeper than the rest of this course, on questions an interviewer who
+understands this domain is likely to ask:
+
+- **Chapter 07** answers: "when the approved-claims library gets revised, how do you stop the
+  Content Comparator from matching against a claim that's since been withdrawn?" This is the
+  analog, in this project, of the document-versioning gotcha in the Capco Document Uploader
+  course.
+- **Chapter 08** covers the production-resilience side: a realistic error-handling table for the
+  claims pipeline, a Sagemaker/Lambda model-version caching caveat, four concrete NLP-pipeline bug
+  stories, and one candidly-named hardening gap.
+
+If you have an interview coming up before you have time for the rest of the course, read these two
+first.
 
 ## 5. How the chapters map to this
 
@@ -240,12 +204,13 @@ chapters 01, 02, 03, 05, 06, 07, and 08.
 ## 7. Notes on framing
 
 Everything in this course describes **a typical/recommended architecture for this kind of pharma
-content-compliance system**, built from the resume bullet and general knowledge of how such systems
-are usually implemented — not verified internal Indegene implementation detail. When you talk about
-this project in an interview, describe it as "how I approached it" / "the design we used," and be
-ready to go one level deeper on any piece if asked (the Q&A bank in `99-Interview-QA.md` is built
-for exactly that).
+content-compliance system**. It's built from the resume bullet plus general knowledge of how such
+systems are usually implemented — it is not verified internal Indegene implementation detail.
 
-Before naming Eli Lilly or AstraZeneca by name to an interviewer, see the confidentiality note in the
-root [README.md](../README.md) — check what your actual NDA/engagement letter allows and default to
-"a top-10 pharma company" if unsure.
+When you talk about this project in an interview, describe it as "how I approached it" / "the
+design we used." Be ready to go one level deeper on any piece if asked — the Q&A bank in
+`99-Interview-QA.md` is built for exactly that.
+
+Before naming Eli Lilly or AstraZeneca by name to an interviewer, see the confidentiality note in
+the root [README.md](../README.md). Check what your actual NDA/engagement letter allows, and
+default to "a top-10 pharma company" if unsure.

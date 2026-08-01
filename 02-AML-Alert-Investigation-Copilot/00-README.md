@@ -6,74 +6,71 @@
 > RAG pipeline (Azure OpenAI + Azure AI Search) — cutting analyst documentation time and accelerating
 > alert-to-closure turnaround while keeping a compliance officer in the loop for sign-off."*
 
-## The load-bearing fact of this whole course, stated up front
+## The one fact that matters most in this whole course
 
-**A compliance officer signs off on every narrative before it becomes part of the official case
-record. This system does not, and by design cannot, close an AML alert on its own.** Everything else
-in this course — the RAG architecture, the structured-drafting prompt engineering, the citation
-requirements, the staleness checks — exists in service of that one constraint. A wrong AML
-determination has real regulatory and financial-crime consequences (a missed Suspicious Activity
-Report is a genuine financial-crime failure; a wasted investigation misdirects a scarce, expensive
-human investigator), so the interesting engineering problem here isn't "can an LLM write a
-convincing case narrative" — it clearly can — it's "how do you build a system that drafts
-*extremely well* while making it structurally impossible for that draft to become a decision without
-an accountable human reading it first." Chapter 4 covers the review workflow in depth; treat this
-paragraph as the answer to give if an interviewer only has time for one question about this project.
+Read this paragraph first. If an interviewer only has time for one question about this project, this is the answer.
+
+**A compliance officer signs off on every narrative before it becomes part of the official case record. This system does not, and cannot by design, close an AML alert on its own.**
+
+Everything else in this course exists to serve that one rule:
+- The RAG (retrieval-augmented generation) architecture
+- The structured-drafting prompt engineering
+- The citation requirements
+- The staleness checks
+
+Why does that rule matter so much? Because a wrong AML (anti-money-laundering) call has real consequences on both sides:
+- Miss something real, and you have a genuine financial-crime failure — a Suspicious Activity Report that never got filed.
+- Flag something that isn't real, and you've sent a scarce, expensive human investigator down the wrong path.
+
+So the interesting engineering question here was never "can an LLM write a convincing case narrative." It clearly can. The real question is: **how do you build a system that drafts extremely well, while making it structurally impossible for that draft to become a decision without an accountable human reading it first?**
+
+Chapter 4 covers the review workflow in depth.
 
 ## Business Context
 
-Banks run rule-based (and increasingly ML-assisted) transaction-monitoring systems that watch account
-activity for patterns associated with money laundering — structuring (breaking a large transaction
-into many smaller ones to stay under a reporting threshold), rapid movement of funds through multiple
-accounts, activity inconsistent with a customer's stated occupation or expected transaction profile,
-and dozens of other rule families. When a pattern trips a rule, the system raises an **alert**.
+Banks run transaction-monitoring systems — rule-based, and increasingly ML-assisted — that watch account activity for patterns linked to money laundering. Examples:
 
-The well-known, industry-wide problem with these systems is a **very high false-positive rate** —
-often cited in the 90%+ range across the industry, though the real figure varies enormously by bank,
-rule tuning, and customer segment. Every alert, true positive or not, has to be reviewed by a human
-AML investigator, who pulls together the customer's KYC (Know Your Customer) profile, the transaction
-history that triggered the alert, and any prior case notes on that customer, and writes a **case
-narrative**: a structured document that summarizes what happened, compares it to the customer's
-expected behavior, calls out red flags, and recommends an outcome — close as false positive, escalate
-for deeper review, or (in the most serious cases) contribute to a **Suspicious Activity Report (SAR)**
-filed with the relevant financial-crime regulator (FinCEN in the U.S., the NCA in the UK, and
-equivalent bodies elsewhere).
+- **Structuring**: breaking one large transaction into many smaller ones to stay under a reporting threshold.
+- **Rapid movement of funds** through multiple accounts.
+- **Activity that doesn't match** a customer's stated occupation or expected transaction profile.
+- Dozens of other rule families.
 
-Writing that narrative well — pulling accurate data from multiple systems, synthesizing it into a
-coherent, well-organized document, under a caseload that can run into dozens of alerts a day per
-investigator — is slow, repetitive, and exactly the kind of multi-source-synthesis task GenAI is good
-at. It is also, simultaneously, a **high-stakes, regulated decision domain** where full automation is
-inappropriate: a hallucinated fact in a narrative, or a subtly wrong comparison to "expected behavior,"
-could drive a real compliance officer toward the wrong call. That tension — strong GenAI fit on the
-drafting side, genuinely risky on the decision side — is why this project exists as a **copilot**, not
-an autonomous decisioning system, and it's the thread every chapter in this course pulls on.
+When a pattern trips a rule, the system raises an **alert**.
+
+Here's the well-known industry problem: these systems have a **very high false-positive rate** — often cited in the 90%+ range across the industry, though the real number varies a lot by bank, rule tuning, and customer segment. Every alert has to be reviewed by a human, whether it turns out to be real or not. That AML investigator has to:
+
+1. Pull together the customer's KYC (Know Your Customer) profile.
+2. Pull the transaction history that triggered the alert.
+3. Pull any prior case notes on that customer.
+4. Write a **case narrative** — a structured document that summarizes what happened, compares it to the customer's expected behavior, calls out red flags, and recommends an outcome.
+
+That outcome is one of: close as false positive, escalate for deeper review, or — in the most serious cases — contribute to a **Suspicious Activity Report (SAR)** filed with the relevant financial-crime regulator (FinCEN in the U.S., the NCA in the UK, and equivalent bodies elsewhere).
+
+Writing that narrative well is slow and repetitive work: pulling accurate data from multiple systems, synthesizing it into one coherent document, under a caseload that can run into dozens of alerts a day per investigator. That's exactly the kind of multi-source-synthesis task GenAI is good at.
+
+But it's also a **high-stakes, regulated decision domain**, where full automation is a bad idea. A hallucinated fact in a narrative, or a subtly wrong comparison to "expected behavior," could push a real compliance officer toward the wrong call.
+
+So there's a real tension here: strong GenAI fit on the drafting side, genuinely risky on the decision side. That tension is why this project is a **copilot** — not an autonomous decision-making system. Every chapter in this course comes back to that thread.
 
 ## Client & Production Framing
 
-The resume bullet names the client generically as **"a global banking client"** — it does not name a
-specific bank. This course frames it plausibly as **HSBC**, consistent with Capco's established
-primary banking client throughout this curriculum (see the root [`README.md`](../README.md)'s
-"Client & Production Context" section), and consistent with this being an adjacent, sibling system to
-Course 1's AI Chatbot Assistant — the two projects plausibly share the same Azure platform footprint
-at the same client. **But say so honestly**: the resume bullet itself only commits to "a global
-banking client." Use "HSBC" in an interview only if you specifically recall that being accurate for
-this engagement (and have checked your NDA per the root README's confidentiality note); otherwise
-"a global banking client" is both accurate to the bullet and safe to say regardless of what you
-recall.
+The resume bullet names the client generically as **"a global banking client"** — it doesn't name a specific bank. This course frames it plausibly as **HSBC**, for two reasons: it's consistent with Capco's established primary banking client throughout this curriculum (see the root [`README.md`](../README.md)'s "Client & Production Context" section), and it's consistent with this being a sibling system to Course 1's AI Chatbot Assistant — the two projects plausibly share the same Azure platform footprint at the same client.
 
-This went to **production with a customer-facing interface** — in this case, "customer-facing" means
-investigator-facing and compliance-officer-facing: the people using this system daily are internal
-AML analysts and compliance officers, not retail bank customers, but it is a real, live, production
-tool serving real daily alert volume, not a proof-of-concept. It ran on the same Azure production
-topology as every other Capco course in this curriculum: **Azure OpenAI**, **Azure AI Search**,
-**Azure App Service** (with deployment slots), **Azure Front Door / Application Gateway** (WAF + TLS
-termination) at the edge, **VNet integration / Private Endpoints** so no backend service is reachable
-from the public internet, **Azure AD** for authentication (tokens via MSAL, RBAC enforced server-side
-— see Course 5's dedicated RBAC/MSAL chapter for the pattern this project plausibly reused), and
-**Azure Monitor / Application Insights** for observability and audit-grade tracing. This is a
-sibling/adjacent system to Course 1's chatbot, not a replacement for it, and the two plausibly share
-platform infrastructure (the same Azure OpenAI resource, the same VNet, the same observability
-stack) even though they serve very different users and very different risk profiles.
+**But be honest about this in an interview.** The resume bullet itself only commits to "a global banking client." Only say "HSBC" if you specifically recall that being accurate for this engagement (and you've checked your NDA per the root README's confidentiality note). Otherwise, "a global banking client" is both accurate to the bullet and safe to say regardless of what you recall.
+
+This system went to **production with a customer-facing interface** — though here, "customer-facing" means investigator-facing and compliance-officer-facing. The daily users are internal AML analysts and compliance officers, not retail bank customers. But it's a real, live production tool serving real daily alert volume, not a proof-of-concept.
+
+It ran on the same Azure production topology as every other Capco course in this curriculum:
+
+- **Azure OpenAI**
+- **Azure AI Search**
+- **Azure App Service** (with deployment slots)
+- **Azure Front Door / Application Gateway** (WAF + TLS termination) at the edge
+- **VNet integration / Private Endpoints**, so no backend service is reachable from the public internet
+- **Azure AD** for authentication (tokens via MSAL, RBAC enforced server-side — see Course 5's dedicated RBAC/MSAL chapter for the pattern this project plausibly reused)
+- **Azure Monitor / Application Insights** for observability and audit-grade tracing
+
+This is a sibling/adjacent system to Course 1's chatbot, not a replacement for it. The two plausibly share platform infrastructure — the same Azure OpenAI resource, the same VNet, the same observability stack — even though they serve very different users and very different risk profiles.
 
 > As with every course in this curriculum apart from Course 5 (which was rebuilt from real source
 > code), **this course has no source repository behind it.** Everything below is a plausible,
@@ -157,11 +154,10 @@ Transaction Monitoring System (upstream, rule-based/ML-assisted) triggers an Ale
   -> (if the officer's recommendation warrants it) SAR Filing System
 ```
 
-Two details worth internalizing from the diagram before reading the chapters: **the structured query
-tool and Azure AI Search are two different retrieval mechanisms feeding the same prompt**, not one
-unified "RAG system" (Chapter 2 is the whole argument for why), and **the human-in-the-loop queue is
-not a UI nicety bolted onto the end — it's the control that makes the rest of the architecture
-defensible to a regulator** (Chapter 4).
+Two details worth internalizing from the diagram before reading the chapters:
+
+1. **The structured query tool and Azure AI Search are two different retrieval mechanisms feeding the same prompt** — not one unified "RAG system." Chapter 2 is the whole argument for why.
+2. **The human-in-the-loop queue is not a UI nicety bolted onto the end.** It's the control that makes the rest of the architecture defensible to a regulator (Chapter 4).
 
 ## STAR Summary (practice this out loud, under 90 seconds)
 
@@ -170,40 +166,21 @@ defensible to a regulator** (Chapter 4).
 > swapped for what you actually measured or a defensible estimate you're comfortable defending under
 > follow-up questions.
 
-**Situation.** At Capco, a global banking client's (plausibly HSBC's — say so honestly if you're not
-certain) AML investigation team was spending a large share of each investigator's day manually
-assembling case narratives for transaction-monitoring alerts — pulling KYC data from one system,
-transaction history from core banking, and prior case notes from a case-management tool, then writing
-up a structured narrative by hand for every alert, the overwhelming majority of which would turn out
-to be false positives. That manual documentation burden was the actual bottleneck on alert-to-closure
-turnaround, not the investigators' judgment.
+**Situation.** At Capco, a global banking client's (plausibly HSBC's — say so honestly if you're not certain) AML investigation team was spending a large share of each investigator's day manually assembling case narratives for transaction-monitoring alerts. That meant pulling KYC data from one system, transaction history from core banking, and prior case notes from a case-management tool, then writing up a structured narrative by hand for every alert — the overwhelming majority of which would turn out to be false positives. That manual documentation burden was the actual bottleneck on alert-to-closure turnaround, not the investigators' judgment.
 
-**Task.** I was asked to architect a GenAI copilot that could auto-draft investigator-ready case
-narratives — synthesizing KYC profiles, transaction history, and prior case notes into a structured,
-citable document — while keeping a compliance officer firmly in the loop for sign-off, since a wrong
-AML determination carries real regulatory and financial-crime consequences that make full automation
-inappropriate for this domain.
+**Task.** I was asked to architect a GenAI copilot that could auto-draft investigator-ready case narratives — synthesizing KYC profiles, transaction history, and prior case notes into a structured, citable document — while keeping a compliance officer firmly in the loop for sign-off. A wrong AML determination carries real regulatory and financial-crime consequences, which makes full automation inappropriate for this domain.
 
-**Action.** I designed a RAG pipeline that deliberately used **two different retrieval mechanisms** for
-three source types: a structured, auditable query/function-calling tool for KYC and transaction data
-(precise lookups, not fuzzy embedding search), and Azure AI Search's semantic/hybrid retrieval for
-prior case notes, the one source that's genuinely unstructured text suited to that kind of search. I
-used structured-output prompting against a six-section narrative template (Customer/KYC Overview,
-Alert Trigger Summary, Transaction Pattern Analysis, Historical/Prior-Case Context, Red Flags
-Identified, Recommendation) and required every factual claim in the draft to cite its source — a
-specific KYC field, transaction ID, or prior case ID — as the primary anti-hallucination defense. I
-built the human-in-the-loop review workflow as a real state machine (DRAFTED → UNDER_REVIEW →
-APPROVED/REJECTED → FINALIZED, with a REGENERATE path on rejection) with a full audit trail of what
-was AI-drafted versus human-edited, and designed a data-freshness check that flags a narrative for
-regeneration if the customer's underlying data changed after the draft was generated but before
-sign-off. All of it ran on the client's existing Azure production topology — Azure OpenAI, Azure AI
-Search, Azure App Service, VNet/Private Endpoints, Azure AD — the same platform pattern as the AI
-Chatbot Assistant project (Course 1).
+**Action.** I designed a RAG pipeline that deliberately used **two different retrieval mechanisms** for the three source types:
+- A structured, auditable query/function-calling tool for KYC and transaction data — precise lookups, not fuzzy embedding search.
+- Azure AI Search's semantic/hybrid retrieval for prior case notes, the one source that's genuinely unstructured text suited to that kind of search.
 
-**Result.** *(Illustrative)* The copilot reduced average per-alert documentation time by roughly 50%
-and cut alert-to-closure turnaround by a comparable margin, while every finalized case record still
-carried an explicit compliance-officer approval and a complete audit trail of the data it was grounded
-in — the throughput gain came from drafting faster, not from reviewing less carefully.
+I used structured-output prompting against a six-section narrative template (Customer/KYC Overview, Alert Trigger Summary, Transaction Pattern Analysis, Historical/Prior-Case Context, Red Flags Identified, Recommendation), and required every factual claim in the draft to cite its source — a specific KYC field, transaction ID, or prior case ID. That citation requirement is the primary anti-hallucination defense.
+
+I built the human-in-the-loop review workflow as a real state machine (DRAFTED → UNDER_REVIEW → APPROVED/REJECTED → FINALIZED, with a REGENERATE path on rejection), with a full audit trail of what was AI-drafted versus human-edited. I also designed a data-freshness check that flags a narrative for regeneration if the customer's underlying data changed after the draft was generated but before sign-off.
+
+All of it ran on the client's existing Azure production topology — Azure OpenAI, Azure AI Search, Azure App Service, VNet/Private Endpoints, Azure AD — the same platform pattern as the AI Chatbot Assistant project (Course 1).
+
+**Result.** *(Illustrative)* The copilot reduced average per-alert documentation time by roughly 50% and cut alert-to-closure turnaround by a comparable margin. Every finalized case record still carried an explicit compliance-officer approval and a complete audit trail of the data it was grounded in — the throughput gain came from drafting faster, not from reviewing less carefully.
 
 ## How This Course Is Organized
 
@@ -219,8 +196,7 @@ in — the throughput gain came from drafting faster, not from reviewing less ca
 | `99-Interview-QA.md` | Behavioral, technical, system-design, and "what would you change" interview Q&A — leads with "why isn't this fully automated," featuring the staleness and data-compliance questions prominently |
 | `notebooks/` | Five runnable Jupyter notebooks, one per major concept, fully offline |
 
-Read in order — each chapter builds on the last, and the notebooks are meant to be run alongside the
-chapter with the matching number.
+Read in order — each chapter builds on the last, and the notebooks are meant to be run alongside the chapter with the matching number.
 
 ---
 

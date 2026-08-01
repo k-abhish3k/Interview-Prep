@@ -3,15 +3,17 @@
 ## Why this chapter matters
 
 Everything in Chapters 01–04 assumes the pipeline receives a reasonably clean image. Real pharma
-documents rarely arrive that way — scanned journal reprints have skew and noise, slide-deck exports
+documents rarely arrive that way: scanned journal reprints have skew and noise, slide-deck exports
 have inconsistent contrast and compression artifacts, and photographed pages have perspective
-distortion. This was true in production for both Eli Lilly's and AstraZeneca's content: neither
+distortion. This was true in production for both Eli Lilly's and AstraZeneca's content — neither
 client's source material arrived as clean, uniform input, so this preprocessing stage had to hold up
-across genuinely varied real-world document quality, not just a curated test set. **OpenCV** is the tool most likely used to close that gap before OCR ever runs, and it's
-explicitly called out in the candidate's skill list for this project. Interviewers ask about
-preprocessing because it's the part of a CV pipeline most junior candidates skip over — being able
-to explain *why* a specific preprocessing step improves downstream accuracy (not just that you
-"used OpenCV") is a strong signal of hands-on experience.
+across genuinely varied real-world document quality, not just a curated test set.
+
+**OpenCV** is the tool most likely used to close that gap before OCR ever runs, and it's explicitly
+called out in the candidate's skill list for this project. Interviewers ask about preprocessing
+because it's the part of a CV pipeline most junior candidates skip over — being able to explain *why*
+a specific preprocessing step improves downstream accuracy, not just that you "used OpenCV," is a
+strong signal of hands-on experience.
 
 ## Why Preprocessing Quality Is an Upstream Multiplier, Not a Nice-to-Have
 

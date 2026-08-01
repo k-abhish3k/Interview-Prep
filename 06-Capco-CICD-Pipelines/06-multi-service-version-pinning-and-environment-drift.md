@@ -113,18 +113,21 @@ actively avoiding in an interview answer:
 Make this concrete with the exact failure mode: the chatbot ships v58, which turns out to have a
 formatting regression, so it's rolled back to v55 — a fast, routine slot-swap-back, exactly as chapter
 04 describes, and it reports success because v55's own contract (status code, response shape *for
-v55's own schema*) is intact. But `citations[]` was introduced specifically in v56, because monitoring
-v41's Ragas-based groundedness scoring (course 04) was changed to read that field directly. Monitoring
-is untouched by the chatbot's rollback — it's still v41, still expecting `citations[]` — so every
-conversation the rolled-back chatbot produces from that point forward is missing a field the monitoring
-platform's evaluation pipeline depends on. Depending on how defensively that parsing code was written,
-the result is either a hard error in the evaluation pipeline (best case — loud, immediately visible) or
-a silent default to an empty citations list that gets scored as "ungrounded" (worst case — the
-model-risk dashboard's hallucination-rate trend line quietly spikes for a window of otherwise-normal
-conversations, and whoever reviews that dashboard for model-risk sign-off has no way to tell the spike
-is a version-compatibility artifact rather than a real regression in chatbot quality). The chatbot's own
-pipeline reported a clean, successful rollback the entire time — it had no way to know it had just
-broken something two services away.
+v55's own schema*) is intact.
+
+But `citations[]` was introduced specifically in v56, because monitoring v41's Ragas-based groundedness
+scoring (course 04) was changed to read that field directly. Monitoring is untouched by the chatbot's
+rollback — it's still v41, still expecting `citations[]` — so every conversation the rolled-back
+chatbot produces from that point forward is missing a field the monitoring platform's evaluation
+pipeline depends on.
+
+Depending on how defensively that parsing code was written, the result is either a hard error in the
+evaluation pipeline (best case — loud, immediately visible) or a silent default to an empty citations
+list that gets scored as "ungrounded" (worst case — the model-risk dashboard's hallucination-rate trend
+line quietly spikes for a window of otherwise-normal conversations, and whoever reviews that dashboard
+for model-risk sign-off has no way to tell the spike is a version-compatibility artifact rather than a
+real regression in chatbot quality). The chatbot's own pipeline reported a clean, successful rollback
+the entire time — it had no way to know it had just broken something two services away.
 
 ## Part 4 — A genuine proposed design: a versioned, atomically-deployed release manifest
 

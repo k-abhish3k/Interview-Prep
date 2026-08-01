@@ -20,12 +20,12 @@ because getting it wrong undermines credibility on everything that follows it.
 > weights, so there's no version of downloading Claude and running it on our own hardware, the way you
 > genuinely can with an open-weight model like Meta's LLaMA — which, incidentally, is a model I've also
 > worked with directly, on a pharma platform that self-hosted a fine-tuned LLaMA 3 on a Sagemaker
-> endpoint. That contrast is actually useful: LLaMA is open-weight and self-hostable; Claude is
-> proprietary and API-only, reachable either directly from Anthropic or through a cloud marketplace. In
-> this project's case, every one of our five agents reaches it through Azure AI Foundry's model
-> catalog — inside the same Azure tenant as our existing enterprise Azure OpenAI deployment, behind the
-> same Private Endpoints and Azure AD gate, not through a separate, lighter-weight environment. So the
-> accurate framing is: a production multi-agent underwriting system where every agent calls Claude, a
+> endpoint. That contrast is useful: LLaMA is open-weight and self-hostable; Claude is proprietary and
+> API-only, reachable either directly from Anthropic or through a cloud marketplace. In this project's
+> case, every one of our five agents reaches it through Azure AI Foundry's model catalog — inside the
+> same Azure tenant as our existing enterprise Azure OpenAI deployment, behind the same Private
+> Endpoints and Azure AD gate, not through a separate, lighter-weight environment. So the accurate
+> framing is: a production multi-agent underwriting system where every agent calls Claude, a
 > proprietary, API-only model accessed via Azure AI Foundry, chosen specifically because its
 > publicly-announced strengths in careful reasoning and agentic tool use are relevant to a multi-agent
 > task shape — not an open-source model evaluation at all."

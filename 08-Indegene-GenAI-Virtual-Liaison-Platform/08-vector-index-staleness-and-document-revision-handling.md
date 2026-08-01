@@ -141,6 +141,13 @@ enforceable at query time, not just at write time.
 **2. A re-index-and-retire write pattern, ordered to fail safe.** When a project's status changes (or
 a document is revised):
 
+```mermaid
+flowchart LR
+    A["Content changes\n(status update, revision)"] --> B["Step 1: upsert NEW vector\n(is_current=True)"]
+    B --> C["Step 2: retire OLD vector\n(is_current=False)"]
+    C --> D["Every retrieval call filters\non is_current=True"]
+```
+
 ```python
 def upsert_new_version(new_content: str, prior_vector_id: str, chunk_id: str,
                         current_version: int, metadata_base: dict):

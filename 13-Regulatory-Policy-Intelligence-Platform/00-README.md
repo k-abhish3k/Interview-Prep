@@ -1,70 +1,77 @@
 # 13 — Regulatory & Policy Document Intelligence Platform
 
-> Framing note: unlike courses 1–12, this course is not built from a single resume bullet. It's
-> constructed to extend this curriculum's existing Capco/banking narrative (courses 1–6) into a
-> workload this candidate's other Capco projects don't cover — self-hosted, open-weight LLM
-> infrastructure — using the same client base, the same Azure production conventions, and the same
-> "illustrative but technically defensible" honesty rules as every other course here. Treat it exactly
-> like the rest of the curriculum: a strong, technically grounded system-design story to tell in an
-> interview, clearly labeled where it's a plausible reconstruction rather than a verified fact. The one
-> exception is Mixtral's architecture itself (Chapter 1) — that part is real, published, independently
-> verifiable technology, and is stated plainly rather than hedged.
+> **Framing note.** Courses 1–12 in this curriculum are each built from a single resume bullet. This
+> course is different: it's constructed to extend the curriculum's existing Capco/banking narrative
+> (courses 1–6) into a workload this candidate's other Capco projects don't cover — **self-hosted,
+> open-weight LLM infrastructure**. It uses the same client base, the same Azure production
+> conventions, and the same "illustrative but technically defensible" honesty rules as every other
+> course here. Treat it exactly like the rest of the curriculum: a strong, technically grounded
+> system-design story to tell in an interview, clearly labeled where it's a plausible reconstruction
+> rather than a verified fact.
+>
+> **One exception: Mixtral's architecture itself (Chapter 1).** That part is real, published,
+> independently verifiable technology. It's stated plainly, not hedged, unlike the business narrative
+> around it.
 
 ## Business Context
 
 Capco's banking clients — the same **HSBC** and **Bank of America** engagements behind courses 1–6 —
 don't just run internal knowledge bases (course 1) and AML alert queues (course 2). Their compliance
-and legal functions sit on top of an enormous, continuously growing stream of **regulatory filings,
-internal policy documents, and legal/contractual text**: regulator publications that need to be
-triaged and mapped against internal policy, internal policy documents that need to be classified
-against a firm-specific taxonomy, and contracts/legal text that needs clause-level extraction for
-downstream review. The volume here is qualitatively different from course 1's chatbot traffic or
-course 2's AML alert volume — this is bulk document processing measured in the tens of thousands of
-pages a week, not a few hundred conversational turns a day, and that volume difference is what drives
-every architectural decision in this course.
+and legal teams also sit on top of an enormous, constantly growing pile of documents:
 
-At that volume, three things stop being abstract concerns and become the actual design constraints:
+- Regulator publications that need to be triaged and matched against internal policy
+- Internal policy documents that need to be classified against the firm's own taxonomy
+- Contracts and legal text that need clause-level extraction for downstream review
 
-1. **Cost at volume.** Per-token API pricing (Azure OpenAI, or a managed model API more generally)
-   scales roughly linearly with tokens processed. At the volume this platform runs, that linear cost
-   curve becomes the dominant line item. A self-hosted model's cost structure is different in kind, not
-   just degree — it's dominated by **fixed GPU-hour compute** rather than per-token billing, so above
-   some breakeven volume, self-hosting gets cheaper per document processed while a metered API keeps
-   scaling with volume indefinitely. Chapter 2 works through the shape of that tradeoff in detail.
+The volume here is a different animal from course 1's chatbot traffic or course 2's AML alert volume.
+This is bulk document processing — tens of thousands of pages a week, not a few hundred conversational
+turns a day. That volume difference is what drives every architectural decision in this course.
+
+At that volume, three things stop being abstract concerns and become real design constraints:
+
+1. **Cost at volume.** Per-token API pricing (Azure OpenAI, or any managed model API) scales roughly
+   linearly with tokens processed. At this platform's volume, that linear cost curve becomes the
+   biggest line item. A self-hosted model has a different kind of cost structure entirely — it's
+   dominated by **fixed GPU-hour compute** rather than per-token billing. Above some breakeven volume,
+   self-hosting gets cheaper per document processed, while a metered API just keeps climbing with
+   volume. Chapter 2 works through this tradeoff in detail.
 2. **Fine-tuning control.** The client wants a model fine-tuned on their own proprietary regulatory
-   taxonomy and internal policy classification scheme — not a generic notion of "financial regulation,"
-   but the client's specific category structure, which evolves as regulations and internal policy
-   change. That requires direct access to model weights for LoRA/QLoRA (or full) fine-tuning, not just
-   whatever constrained fine-tuning surface a managed API vendor chooses to expose, if any.
+   taxonomy and internal policy classification scheme — not a generic idea of "financial regulation,"
+   but the client's specific category structure, which changes as regulations and internal policy
+   change. That requires direct access to model weights for LoRA/QLoRA (or full) fine-tuning — not
+   whatever narrow fine-tuning surface a managed API vendor happens to expose, if it exposes one at
+   all.
 3. **Model transparency and audit.** This ties directly to course 4's model-risk-monitoring themes.
-   For internal audit and model-risk-governance purposes, the client's model-risk function wants to be
-   able to fully inspect and validate *exactly* what model is running — down to the weights — something
-   a closed-weight, API-only model can never offer, no matter how much telemetry the API vendor exposes
-   around it.
+   The client's model-risk function wants to fully inspect and validate *exactly* what model is
+   running — down to the weights — for internal audit and governance purposes. A closed-weight,
+   API-only model can never offer that, no matter how much telemetry the API vendor wraps around it.
 
-These are three genuinely distinct arguments, not one vague "open is better" argument, and Chapter 2
-treats each one separately, with its own reasoning and its own limits.
+These are three genuinely separate arguments, not one vague "open is better" claim. Chapter 2 treats
+each one on its own, with its own reasoning and its own limits.
 
-## The model: Mixtral 8x7B
+## The Model: Mixtral 8x7B
 
 The model chosen for this platform is **Mixtral 8x7B**, Mistral AI's sparse Mixture-of-Experts (MoE)
-language model, released under the **Apache 2.0 license** — genuinely open-weight, genuinely
-documented in Mistral's own published technical materials. Chapter 1 is a full, accurate technical
-walkthrough of its real architecture (decoder-only Transformer, Grouped-Query Attention, Sliding
-Window Attention, sparse top-2-of-8 expert routing per layer) — this is confirmed, publicly verifiable
-technology, described plainly and confidently rather than hedged the way this course's specific
-business narrative is hedged.
+language model. It's released under the **Apache 2.0 license** — genuinely open-weight, and genuinely
+documented in Mistral's own published technical materials.
 
-It's also worth being precise about a real, easily-confused option this course deliberately did
-**not** take: **Mistral's models, including Mixtral, are also available through Azure AI Foundry's
-model catalog as a managed API** — the same multi-vendor catalog course 3 covers for Claude. Choosing
-Azure AI Foundry would have gotten Mixtral **as a hosted API call**, with none of the infrastructure
-burden of self-hosting. This project specifically chose **self-hosting on Azure ML / AKS** instead,
-precisely because reasons (2) and (3) above — fine-tuning control and full weight-level transparency —
-are not satisfied by a managed API, even a multi-vendor one that happens to serve an open-weight model.
-Azure AI Foundry gives you Mixtral as weights someone else runs for you; this project needed Mixtral as
-weights the client's own model-risk function could hold, hash, and inspect. That's a meaningfully
-different architecture choice, not a minor deployment detail, and Chapter 2 draws the line precisely.
+Chapter 1 is a full, accurate walkthrough of its real architecture: a decoder-only Transformer with
+Grouped-Query Attention, Sliding Window Attention, and sparse top-2-of-8 expert routing per layer.
+This is confirmed, publicly verifiable technology. It's described plainly and confidently — not hedged
+the way this course's business narrative is hedged.
+
+It's also worth flagging a real option this course deliberately did **not** take, because it's easy to
+confuse with what was chosen: **Mistral's models, including Mixtral, are also available through Azure
+AI Foundry's model catalog as a managed API** — the same multi-vendor catalog course 3 covers for
+Claude. Choosing Azure AI Foundry would have gotten Mixtral **as a hosted API call**, with none of the
+infrastructure burden of self-hosting.
+
+This project chose **self-hosting on Azure ML / AKS** instead — specifically because reasons (2) and
+(3) above, fine-tuning control and full weight-level transparency, aren't satisfied by a managed API,
+even a multi-vendor one that happens to serve an open-weight model. Azure AI Foundry gives you Mixtral
+as weights someone else runs for you. This project needed Mixtral as weights the client's own
+model-risk function could hold, hash, and inspect. That's a meaningfully different architecture
+choice, not a minor deployment detail — Chapter 2 draws the line precisely.
 
 ## Client & Production Framing
 
@@ -72,11 +79,12 @@ Same client base, same Azure production conventions as the rest of the Capco cou
 curriculum (see the root [README's Client & Production Context](../README.md#client--production-context-applies-to-every-course-below)):
 delivered for **HSBC** and **Bank of America**, deployed on **Azure**, secured behind **VNet
 integration / Private Endpoints** (no backend service reachable from the public internet), **Azure
-AD** for authentication/authorization, and monitored with **Azure Monitor**. What's different here,
-architecturally, from courses 1, 2, 5, and 6 is the presence of a **self-hosted GPU-backed model
-serving layer** (Azure ML managed online endpoints, or AKS with vLLM/TGI — Chapter 4) sitting where
-those other courses have a Private-Endpoint call out to Azure OpenAI. The security *boundary* is
-identical; what's running inside a piece of it is not.
+AD** for authentication/authorization, and monitored with **Azure Monitor**.
+
+What's architecturally different here from courses 1, 2, 5, and 6 is the presence of a **self-hosted
+GPU-backed model serving layer** — Azure ML managed online endpoints, or AKS with vLLM/TGI (Chapter 4)
+— sitting where those other courses just have a Private-Endpoint call out to Azure OpenAI. The
+security *boundary* is identical. What's running inside a piece of it is not.
 
 ## Architecture Diagram
 
@@ -203,8 +211,8 @@ an API-only deployment.
 | `99-Interview-QA.md` | Behavioral, technical, system-design, and "what would you change" interview Q&A |
 | `notebooks/` | Five runnable Jupyter notebooks, fully offline, numpy-only — MoE routing, active-vs-total parameter cost, quantization tradeoffs, taxonomy drift detection, model provenance verification |
 
-Read in order — `00-README.md` -> chapters `01`-`08` -> notebooks (run alongside the chapter with the
-matching concept) -> `99-Interview-QA.md` last, once the concepts are fresh.
+Read in order: `00-README.md` → chapters `01`–`08` → notebooks (run alongside the chapter with the
+matching concept) → `99-Interview-QA.md` last, once the concepts are fresh.
 
 ---
 
