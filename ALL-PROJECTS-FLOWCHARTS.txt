@@ -1,0 +1,328 @@
+================================================================================
+ALL PROJECTS - SIMPLE FLOW CHARTS  (quick-reference cheat sheet)
+================================================================================
+One flow chain per project. Read top to bottom, "->" = "flows into".
+[bracketed text] = 2-5 keyword explanation of that component, only where the
+name alone isn't self-explanatory.
+
+Full detail for each project lives in its own 00-README.md in the matching
+numbered folder in this directory.
+
+
+================================================================================
+01 - CAPCO AI CHATBOT ASSISTANT   (client: HSBC, production)
+================================================================================
+User (HSBC staff/customer)
+  -> Azure Front Door / App Gateway [WAF, TLS termination]
+  -> Azure AD [MSAL.js, OAuth2/OIDC login]
+  -> react-service [React SPA chat UI, own microservice]
+  -> Azure App Service Backend [Chat API, streaming SSE/WebSocket, deployment slots]
+  -> LangChain / LCEL Pipeline [prompt -> retrieval -> parser composition]
+  -> Azure AI Search [RAG retrieval index]
+  -> Azure OpenAI [GPT-3.5/4-class LLM, response generation]
+  -> Streamed response back to User
+
+Supporting (side calls, not in the main line):
+  - Azure Key Vault [secrets, via Private Endpoint]
+  - Azure Monitor / Application Insights [observability, audit tracing]
+  - Azure DevOps CI/CD [build/test/deploy pipeline, only path to prod]
+  - Everything inside a VNet, reached only via Private Endpoints (no public internet)
+
+
+================================================================================
+02 - AML ALERT INVESTIGATION COPILOT   (client: global banking / HSBC, production)
+================================================================================
+Transaction Monitoring System [rule-based/ML alert trigger, upstream, not built here]
+  -> Data-Gathering Layer
+       |-- KYC Profile Store [structured customer data]
+       |-- Core Banking / Transaction History [structured, time-series]
+       `-- Prior Case Notes Store [unstructured text]
+  -> Retrieval (two mechanisms, not one RAG index)
+       |-- Structured Query Tool [function-calling, precise KYC/txn lookups]
+       `-- Azure AI Search [semantic/hybrid retrieval over prior case notes]
+  -> Azure OpenAI [structured-output drafting, six-section narrative template]
+  -> Citation / Grounding Check [every claim must cite a source]
+  -> Compliance Officer Review Queue [human-in-the-loop]
+  -> Approve / Edit / Reject  [Reject -> regenerate]
+  -> Finalized Case Record [+ full audit trail]
+  -> SAR Filing System [only if escalated]
+
+
+================================================================================
+03 - MULTI-AGENT CREDIT UNDERWRITING ASSISTANT   (Claude Research Project, production)
+================================================================================
+Loan Application + Documents
+  -> Supervisor / Orchestrator Agent [LangGraph state graph, routes & sequences work]
+       -- parallel dispatch (no dependency between these two) -->
+            Financial Spreading Agent [extracts financial ratios via tool calls]
+            Risk Assessment Agent [industry/macro risk scoring]
+       -- sequential dispatch -->
+            Credit Policy Compliance Agent [RAG over Azure AI Search credit-policy corpus;
+                                             needs Financial Spreading Agent's ratios first]
+            Underwriting Memo Drafting Agent [structured, per-claim-cited memo;
+                                               needs all three other agents' outputs]
+  -> Supervisor synthesizes + checks completeness
+  -> Human Loan Officer [review + sign-off, human-in-the-loop]
+  -> Finalized Underwriting Memo
+
+(All agents call Claude via Azure AI Foundry Model Catalog [Private Endpoint] -
+ NOT Azure OpenAI Service, which cannot serve Claude. Same Azure tenant/VNet/AD/Monitor
+ as projects 01 and 02.)
+
+
+================================================================================
+04 - CAPCO MODEL RISK MONITORING   (watches project 01's chatbot, clients: HSBC + BofA)
+================================================================================
+End User -> AI Assistant [Azure App Service, production, = project 01]
+  -> response
+  -> Metric Evaluators
+       |-- Non-LLM metrics [accuracy, robustness, latency, PII/toxicity rules]
+       |-- LLM-as-judge metrics [completeness, hallucination, harmfulness]
+       `-- Ragas RAG metrics [faithfulness, relevancy, context precision/recall]
+  -> Metrics Store [Azure Monitor / App Insights, partitioned per client]
+  -> Dashboards [Power BI / Tableau - separate HSBC dashboard, separate BofA dashboard]
+  -> Alerting [threshold breaches, scoped per client]
+  -> Model Risk Team (per client)
+  -> feedback loop: tuning / guardrail updates / retraining triggers -> back to AI Assistant
+
+(User feedback: thumbs up/down, reliance, engagement -> also feeds the Metrics Store.
+ Explainability layer: SHAP / LIME / Shapash, makes scoring decisions auditable.)
+
+
+================================================================================
+05 - CAPCO DOCUMENT UPLOADER SERVICE   (client: HSBC, production - rebuilt from real code)
+================================================================================
+Browser [Uploader / Approver Web UI]
+  -> Azure App Service - single FastAPI process (app.py)
+       -> Azure AD / Entra ID [OAuth2/OIDC login; MSAL for on-behalf-of + client-credentials only]
+       -> RBAC [AAD app roles from unverified JWT] + Feature Flags [HSBC INM-AI Config Service]
+       -> decision: use_case == "IWPB" ?
+
+  IWPB branch (Yes):
+    -> Stage file in Azure Blob Storage [container: pending-iwpb-uploads]
+    -> Write DB row [Azure SQL, table iwpb_document_workflow]
+    -> Notify Approver by SMTP [approver match = separate relationship-based auth,
+                                  email vs. ApproverMapping table]
+    -> Approver Decision
+         |-- Approve -> Ingest into HEXA [external Ingestion API, system of record]
+         `-- Decline / auto-remove (3-day) / expire -> Purged, never ingested
+    (background: hourly asyncio maintenance loop handles reminders/auto-removal/purge)
+
+  All other departments (No - FEMA, TPMB, GTRM, generic):
+    -> Ingest into HEXA directly via INGEST_API [no approval step, no email]
+
+No document versioning today: every upload gets a brand-new documentID (see ch.05).
+
+
+================================================================================
+06 - CAPCO CI/CD PIPELINES   (deploys projects 01, 04, 05 for clients HSBC + BofA)
+================================================================================
+Developer git push / PR merge
+  -> Git Repo [GitHub / Azure Repos, PR-gated]
+  -> Build & Lint Stage
+  -> Unit / Integration Tests
+  -> Security & Dependency Scan
+  -> Container Build [Docker image -> Azure Container Registry]
+  -> Terraform Plan [infrastructure as code]
+  -> Approval Gate [manual sign-off]
+  -> Per-client stage matrix [same pipeline template, parameterized by client]
+       |-- client = HSBC -> Terraform Apply -> Deploy to HSBC App Service slot -> Smoke Test
+       `-- client = BofA -> Terraform Apply -> Deploy to BofA App Service slot -> Smoke Test
+  -> (on smoke-test failure) Rollback / Slot Swap Back [isolated per client]
+
+(Each client has its own service connection + variable group + Key Vault - never shared.)
+
+
+================================================================================
+07 - INDEGENE SUPERSCRIPT/SUBSCRIPT DETECTION   (clients: Eli Lilly + AstraZeneca, production)
+================================================================================
+Input Image [slide deck / scan / journal reprint]
+  -> OpenCV Preprocessing [binarization, deskew, ROI cropping]
+  -> Stage 1: OCR [text + word bounding boxes + baseline metadata]
+  -> Stage 2: YOLO [object detection - finds small, elevated superscript-candidate regions]
+  -> Stage 3: Deep-CNN Classifier [true superscript vs. false positive - filters list numbers,
+                                    exponents, noise]
+  -> Structured Citation Output [claim text + marker + linked reference]
+
+Production deployment (AWS, per-client isolated via S3 prefixes + IAM):
+  Document upload -> S3 -> ECS Fargate [OCR + orchestration, behind ALB]
+  -> Sagemaker endpoint [YOLO + CNN inference]
+  -> Structured output -> S3 / downstream systems
+  (CloudWatch observability throughout; Lambda + API Gateway for lightweight triggers)
+
+Result: citation-tracking accuracy 5% -> 85%.
+
+
+================================================================================
+08 - INDEGENE GENAI VIRTUAL LIAISON PLATFORM   (clients: Eli Lilly + AstraZeneca, production)
+================================================================================
+Client (Chat or Voice, any language)
+  -> Language Detection / Translation Layer
+  -> LangChain / LangGraph Orchestration Layer [intent routing]
+       -->|status/project question|      Project-Data RAG [LangChain retriever -> Pinecone]
+       -->|"summarize this project"|     Summarization Module [map-reduce / refine chain]
+       -->|"how much would X cost"|      Cost-Catalog RAG [Pinecone + hybrid BM25+dense search]
+       -->|"I need a new localization"|  Entity Extraction [structured output -> project record]
+       -->|"show me something similar"|  Recommender Module [embedding similarity]
+  -> LLM Response Generation [grounded in whichever sub-system fired]
+  -> Translate back to client's language
+  -> Chat / Voice Response
+
+Production (AWS): Voice/Chat Frontend -> ALB -> ECS Fargate [LangGraph orchestration]
+  -> Pinecone [namespaced per client: eli-lilly / astrazeneca]
+  -> Sagemaker / Bedrock [model inference]
+  (S3 per-client prefix for source docs; Lambda+API Gateway for voice-callback webhooks;
+   CloudWatch observability; per-client isolation is the hard requirement)
+
+
+================================================================================
+09 - INDEGENE CLAIM EXTRACTION & TAGGING   (clients: Eli Lilly + AstraZeneca, production)
+================================================================================
+Marketing Doc [PDF / HTML / PPT]
+  -> ECS Fargate API [behind ALB, tags every request with client_id]
+  -> Text Ingestion & Sentence Segmentation
+  -> Claim Extraction model [fine-tuned BERT -> candidate claim sentences]
+       |-- Claim Classification [multi-label: efficacy / safety / dosing / comparative]
+       `-- ISI Presence/Completeness Classifier [mandatory Important Safety Information check]
+  -> Content Comparator [vs. approved source library, TF-IDF + embedding similarity,
+                          client-scoped S3 prefix]
+  -> Flagged-for-review Queue [human-in-the-loop medical/legal reviewer, client-scoped]
+
+MLOps / retraining loop (runs independently per client):
+  Retraining trigger [scheduled/drift/perf]
+  -> Sagemaker fine-tuning job [client-specific IAM role + training data]
+  -> S3 artifact store [client-isolated prefixes, versioned model weights]
+  -> Lambda + API Gateway [client_id-aware request routing]
+  -> Sagemaker multi-model endpoints [namespaced per client, own auto-scaling policy]
+  -> CloudWatch metrics [drive scaling + alerting]
+  (EventBridge Scheduler runs periodic health checks on live endpoints)
+
+
+================================================================================
+10 - INDEGENE CHART/GRAPH DETECTION   (clients: Eli Lilly + AstraZeneca, production)
+================================================================================
+Training pipeline:
+  Raw document/slide images
+  -> AWS Ground Truth [collaborative annotation - bounding boxes on charts/graphs]
+  -> Labeled training dataset
+  -> YOLOv5 Fine-tuning [AWS Sagemaker, transfer learning from COCO-pretrained weights]
+  -> Model artifact [weights.pt]
+
+Serving pipeline:
+  -> Lambda Inference Handler [loads model, runs detection]
+  -> API Gateway [REST endpoint, auth, throttling]
+  -> Caller / downstream pipeline [chart regions routed for separate processing]
+
+Production request path (AWS, per-client isolated via S3 prefix + IAM):
+  Client documents -> S3 -> ECS Fargate [ingestion orchestration, behind ALB]
+  -> API Gateway -> Lambda -> Sagemaker endpoint [fine-tuned YOLOv5]
+  -> Detection results written back to S3 -> Downstream pipeline stage
+
+Result: 96% TPR (recall) at IOU threshold 0.85.
+
+
+================================================================================
+11 - INDEGENE GENAI REGULATORY PLATFORM  (ICF / PLPS / SOC, clients: Eli Lilly + AstraZeneca)
+================================================================================
+Clinical Trial Protocol [uploaded to S3, per-client bucket]
+  -> Structuring & Parsing [ECS Fargate behind ALB - section/heading detection, chunking,
+                             so a 200-page protocol fits the model's context window]
+  -> Per-module Instruction-based Generation [Sagemaker, fine-tuned LLaMA 3 endpoint]
+       |-- ICF sections   [Informed Consent Form - patient-facing]
+       |-- PLPS sections  [Plain Language Protocol Synopsis]
+       `-- SOC entries    [Summary of Changes vs. prior protocol amendment]
+
+  (separate path) Country variant doc
+       -> Graph-based Country Comparison [self-hosted GraphDB + Cypher queries -
+                                           models requirements as nodes, differences as edges]
+
+  All outputs -> Human Review & Approval [regulatory-affairs reviewer, mandatory gate]
+  -> Client Submission Workflow [Eli Lilly / AstraZeneca]
+
+(LLaMA 3 chosen as open-weight model for data residency/IP protection on sensitive
+ unpublished trial data; supporting: Lambda+API Gateway, CloudWatch, Secrets Manager.)
+
+
+================================================================================
+12 - TOUGHEST CHALLENGES: PRODUCTION AND DEVELOPMENT   (interview answer bank, not a system)
+================================================================================
+This folder has no architecture of its own - it's a STAR-format war-story bank covering
+the two most common senior-interview questions, built from the real stacks used above
+(Capco/Azure for banking, Indegene/AWS for pharma). Flow = "which bucket does the
+interviewer's question fall into":
+
+Interviewer question
+  -> "Toughest problem in PRODUCTION, after launch, under real load?"
+       |-- 01 Scaling & Reliability          [traffic spikes, LLM provider rate limits]
+       |-- 02 Security/Compliance/Multi-Tenant Isolation [bank network isolation, audit trails]
+       |-- 03 Observability & Incident Response [LLM monitoring, on-call, rollback]
+       `-- 04 Cost & LLM Quota Management     [token budgets, client blowing through quota]
+  -> "Toughest problem DURING DEVELOPMENT, before launch?"
+       |-- 05 Data Scarcity & Labeling        [scarce/expensive labels, active learning]
+       |-- 06 LLM Evaluation Before Production [golden eval sets, catching hallucination]
+       |-- 07 Integration with Legacy Client Systems [legacy SOAP/on-prem, procurement gates]
+       `-- 08 Cross-Functional Collaboration  [compliance/MLR reviewers with veto power]
+  -> (cross-cutting, any question) 09 "Everything Eventually Needs a Revision" pattern
+       [generalized 5-step answer shape for "how do you handle a revised version of X",
+        reused across every project above]
+  -> 99 Interview Q&A cheat sheet [maps question phrasing to the right chapter]
+
+
+================================================================================
+13 - REGULATORY & POLICY DOCUMENT INTELLIGENCE PLATFORM   (Mixtral, clients: HSBC + BofA)
+================================================================================
+Document Ingestion [Policy Corpus + Regulatory Filings, bulk volume - 10,000s pages/week]
+  -> Azure Blob Storage [document corpus, inside VNet]
+  -> Orchestration Service [classification / extraction / summarization pipeline]
+       |-- Azure AI Search [hybrid retrieval layer, Private Endpoint]
+       `-- Self-Hosted Mixtral 8x7B Serving Layer [Private Endpoint -
+              Azure ML managed online endpoint OR AKS + vLLM/TGI, GPU-backed, autoscaling]
+              -> Model Registry [base-model weights hash + taxonomy version, for audit]
+  -> Classification / Extraction / Summarization output
+  -> Compliance / Legal Reviewer [human-in-the-loop sign-off]
+
+Why self-hosted instead of Azure OpenAI/Azure AI Foundry API: (1) cost at high token
+volume, (2) LoRA/QLoRA fine-tuning control on client's own taxonomy, (3) weight-level
+transparency for the bank's model-risk audit function.
+(Azure AD/RBAC gates access; Azure Monitor observes every stage; VNet/Private Endpoints
+throughout - same security boundary as projects 01, 02, 03.)
+
+
+================================================================================
+14 - SYSTEMATIC LITERATURE REVIEW COPILOT   (DeepSeek, clients: Eli Lilly + AstraZeneca)
+================================================================================
+Literature Sources [PubMed / external databases + client-licensed sources]
+  -> S3 [raw corpus per review, per-client bucket/prefix]
+  -> Step Functions / AWS Batch [orchestrates multi-stage batch pipeline]
+  -> SageMaker - Self-Hosted DeepSeek [Batch Transform / async inference]
+       -> Stage 1: SCREEN abstracts [vs. inclusion/exclusion criteria, tagged with
+                    model-version + criteria-version]
+       -> Stage 2: EXTRACT structured data [population, intervention, comparator, outcomes]
+       -> Stage 3: SYNTHESIZE [draft narrative/tabular synthesis across included studies]
+  -> Human Medical Writer / Reviewer [sign-off queue - nothing skips this gate]
+       |-- approve -> Final SLR Report [PRISMA-style, full audit trail]
+       `-- flag / reject -> back to Screening or Extraction for correction
+
+Why self-hosted DeepSeek instead of a managed API: (1) cost at extreme volume
+(10,000s of abstracts/review), (2) LoRA/QLoRA fine-tuning to therapeutic-area
+vocabulary, (3) fixed/versioned/auditable model artifact for regulatory submissions.
+(CloudWatch observes every stage; VPC/Private-Endpoint boundary throughout.)
+
+
+================================================================================
+CROSS-PROJECT PATTERNS WORTH NOTICING
+================================================================================
+- Capco projects (01, 02, 03, 04, 05, 06, 13) = banking clients (HSBC / Bank of America),
+  Azure stack: App Service, Front Door/WAF, VNet/Private Endpoints, Azure AD, Azure Monitor.
+- Indegene projects (07, 08, 09, 10, 11, 14) = pharma clients (Eli Lilly / AstraZeneca),
+  AWS stack: S3, ECS Fargate/ALB, Sagemaker, Lambda+API Gateway, CloudWatch.
+- Every project ends in a human-in-the-loop gate before anything becomes final/official -
+  compliance officer (02), loan officer (03), model-risk team (04), IWPB approver (05),
+  MLR/medical-legal reviewer (09), regulatory-affairs reviewer (11), medical writer (14).
+- Multi-tenancy / per-client data isolation (separate S3 prefixes or buckets, separate
+  Pinecone namespaces, separate IAM roles, separate variable groups) is a recurring,
+  non-negotiable requirement across almost every project because clients are direct
+  competitors (Eli Lilly vs. AstraZeneca; HSBC vs. Bank of America).
+- "Vector index / document goes stale after a source update" is a recurring gotcha chapter
+  in nearly every course (05 ch.05, 07 ch.06, 08 ch.08, 09 ch.07, 10 ch.06, 11 ch.06,
+  13 ch.07, 14 ch.07) - see project 12, chapter 09 for the generalized answer shape.
